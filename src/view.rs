@@ -29,10 +29,6 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         crate::app::ColorChoice::Auto => {}
     }
 
-    if writeln!(io::stdout(), "{}", args.path.display().to_string().blue().bold()).is_err() {
-        return Ok(());
-    }
-
     let git_repo_status = if args.git_status { git::load_status(&canonical_root)? } else { None };
     let status_cache = git_repo_status.as_ref().map(|s| &s.cache);
     let repo_root = git_repo_status.as_ref().map(|s| &s.root);
@@ -54,10 +50,6 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
                 continue;
             }
         };
-
-        if entry.depth() == 0 {
-            continue;
-        }
 
         let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
         if args.dirs_only && !is_dir {
@@ -199,10 +191,11 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
         if writeln!(
             io::stdout(),
-            "{}{}{}└── {}{}{}",
+            "{}{}{}{}{}{}{}",
             git_status_str,
             permissions_str.dimmed(),
             indent,
+            if entry.depth() == 0 { "" } else { "└── " },
             icon_str,
             //styled_name,
             final_name,
