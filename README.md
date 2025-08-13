@@ -34,11 +34,7 @@ A fast, minimalist directory tree viewer, written in Rust. Inspired by the comma
 
 The easiest way to install `lstr` on macOS is with Homebrew.
 
-```bash
-# First, tap our repository
-brew tap bgreenwell/lstr
-
-# Now, install lstr
+```zsh
 brew install lstr
 ```
 
