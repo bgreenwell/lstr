@@ -112,7 +112,15 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        let indent = "    ".repeat(entry.depth().saturating_sub(1));
+        const INDENT_STR: &str = "    ";
+        const BRANCH_STR: &str = "└── ";
+        let mut indent = INDENT_STR.repeat(entry.depth());
+        if entry.depth() != 0 {
+            indent.replace_range(
+                indent.len().saturating_sub(BRANCH_STR.len())..indent.len(),
+                BRANCH_STR,
+            );
+        }
         let name = entry.file_name().to_string_lossy();
         let icon_str = if args.icons {
             let (icon, color) = icons::get_icon_for_path(entry.path(), is_dir);
@@ -191,11 +199,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
         if writeln!(
             io::stdout(),
-            "{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             git_status_str,
             permissions_str.dimmed(),
             indent,
-            if entry.depth() == 0 { "" } else { "└── " },
             icon_str,
             //styled_name,
             final_name,
