@@ -56,6 +56,14 @@ You need the Rust toolchain installed on your system to build `lstr`.
     cargo install --path .
     ```
 
+### NetBSD
+
+On NetBSD a package is available from the official repositories. To install it, simply run:
+
+```bash
+pkgin install lstr
+```
+
 ## Usage
 
 ```bash
