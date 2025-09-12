@@ -222,7 +222,6 @@ impl AppState {
         self.search_query.clear();
     }
 
-
     /// Exit search/filter mode and restore original view
     fn exit_search_mode(&mut self) {
         if self.search_mode != SearchMode::None {
@@ -230,7 +229,7 @@ impl AppState {
             self.original_visible_entries.clear();
             self.search_mode = SearchMode::None;
             self.search_query.clear();
-            
+
             // Restore selection to valid index
             if let Some(selected) = self.list_state.selected() {
                 if selected >= self.visible_entries.len() {
@@ -274,10 +273,12 @@ impl AppState {
         } else {
             // Filter entries based on search query (case-insensitive filename match)
             let query_lower = self.search_query.to_lowercase();
-            self.visible_entries = self.original_visible_entries
+            self.visible_entries = self
+                .original_visible_entries
                 .iter()
                 .filter(|entry| {
-                    entry.path
+                    entry
+                        .path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .map(|name| name.to_lowercase().contains(&query_lower))
@@ -286,15 +287,11 @@ impl AppState {
                 .cloned()
                 .collect();
         }
-        
+
         // Reset selection to first item if current selection is out of bounds
         if let Some(selected) = self.list_state.selected() {
             if selected >= self.visible_entries.len() {
-                let new_selection = if self.visible_entries.is_empty() {
-                    None
-                } else {
-                    Some(0)
-                };
+                let new_selection = if self.visible_entries.is_empty() { None } else { Some(0) };
                 self.list_state.select(new_selection);
             }
         }
@@ -324,7 +321,8 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             Command::new(editor).arg(path).status()?;
         }
         PostExitAction::PrintPath(path) => {
-            println!("{}", path.display());
+            let display_path = path.clone().display().to_string().replace(r"\\?\", "");
+            println!("{}", display_path);
         }
         PostExitAction::None => {}
     }
@@ -365,7 +363,14 @@ fn run_app<B: Backend + Write>(
                     KeyCode::Backspace if app_state.in_search_mode() => {
                         app_state.remove_from_query();
                     }
-                    KeyCode::Char(c) if app_state.in_search_mode() && (c.is_alphanumeric() || c == '.' || c == '_' || c == '-' || c == ' ') => {
+                    KeyCode::Char(c)
+                        if app_state.in_search_mode()
+                            && (c.is_alphanumeric()
+                                || c == '.'
+                                || c == '_'
+                                || c == '-'
+                                || c == ' ') =>
+                    {
                         app_state.append_to_query(c);
                     }
                     KeyCode::Down | KeyCode::Char('j') => app_state.next(),
@@ -458,8 +463,8 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0),     // Main area (flexible)
-            Constraint::Length(1),  // Status line (1 row)
+            Constraint::Min(0),    // Main area (flexible)
+            Constraint::Length(1), // Status line (1 row)
         ])
         .split(f.size());
 
@@ -478,12 +483,11 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
         "Press / to search, q to quit".to_string()
     };
 
-    let status_paragraph = Paragraph::new(status_text)
-        .style(if app_state.in_search_mode() { 
-            Style::default().fg(Color::Yellow) 
-        } else { 
-            Style::default().fg(Color::Gray) 
-        });
+    let status_paragraph = Paragraph::new(status_text).style(if app_state.in_search_mode() {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    });
     f.render_widget(status_paragraph, chunks[1]);
 }
 
