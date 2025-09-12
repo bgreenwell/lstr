@@ -321,7 +321,13 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             Command::new(editor).arg(path).status()?;
         }
         PostExitAction::PrintPath(path) => {
-            let display_path = path.clone().display().to_string().replace(r"\\?\", "");
+            let path_string = path.display().to_string();
+            let display_path = if path_string.len() <= 260 {
+                path_string.replace(r"\\?\", "")
+            } else {
+                // Keep \\?\ when it exceeds 260 characters. to avoid potential problems.
+                path_string
+            };
             println!("{}", display_path);
         }
         PostExitAction::None => {}
