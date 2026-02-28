@@ -191,6 +191,34 @@ impl AppState {
         self.list_state.selected().and_then(|i| self.visible_entries.get(i))
     }
 
+    fn close_encompassing_directory(&mut self) {
+        if let Some(selected_index) = self.list_state.selected() {
+            let selected_path = self.visible_entries[selected_index].path.clone();
+            if let Some(master_entry) =
+                self.master_entries.iter_mut().find(|e| e.path == selected_path)
+            {
+                if master_entry.is_dir && master_entry.is_expanded {
+                    master_entry.is_expanded = false;
+                } else if let Some(parent_entry) = self
+                    .master_entries
+                    .iter_mut()
+                    .find(|e| e.path == selected_path.parent().unwrap())
+                {
+                    parent_entry.is_expanded = false;
+                }
+            }
+            self.regenerate_visible_entries();
+            if let Some(new_index) =
+                self.visible_entries.iter().position(|e| e.path == selected_path.parent().unwrap())
+            {
+                self.list_state.select(Some(new_index));
+            } else {
+                let new_selection = selected_index.min(self.visible_entries.len() - 1);
+                self.list_state.select(Some(new_selection));
+            }
+        }
+    }
+
     fn toggle_selected_directory(&mut self) {
         if let Some(selected_index) = self.list_state.selected() {
             let selected_path = self.visible_entries[selected_index].path.clone();
@@ -370,7 +398,10 @@ fn run_app<B: Backend + Write>(
                     }
                     KeyCode::Down | KeyCode::Char('j') => app_state.next(),
                     KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
-                    KeyCode::Enter => {
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        app_state.close_encompassing_directory();
+                    }
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                         if let Some(entry) = app_state.get_selected_entry() {
                             if entry.is_dir {
                                 app_state.toggle_selected_directory();
