@@ -625,3 +625,43 @@ fn test_git_status_propagates_to_directories() -> Result<(), Box<dyn std::error:
     assert!(clean_line.starts_with("  "), "clean file should have no marker: {clean_line}");
     Ok(())
 }
+
+#[test]
+fn test_file_depth_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("adir"))?;
+    fs::write(temp_dir.path().join("adir/deep1.txt"), "x")?;
+    fs::write(temp_dir.path().join("adir/deep2.txt"), "x")?;
+    fs::write(temp_dir.path().join("top.txt"), "x")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--file-depth").arg("1").arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("top.txt"))
+        .stdout(predicate::str::contains("adir"))
+        .stdout(predicate::str::contains("deep1.txt").not())
+        .stdout(predicate::str::contains("[+2 files]"));
+    Ok(())
+}
+
+#[test]
+fn test_max_items_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    for name in ["a1.txt", "a2.txt", "a3.txt", "a4.txt"] {
+        fs::write(temp_dir.path().join(name), "x")?;
+    }
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--max-items").arg("2").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("a1.txt") && stdout.contains("a2.txt"), "{stdout}");
+    assert!(!stdout.contains("a3.txt") && !stdout.contains("a4.txt"), "{stdout}");
+    // Kept entries keep mid-list connectors; the summary is the last child.
+    assert!(stdout.contains("├── a2.txt"), "{stdout}");
+    assert!(stdout.contains("└── [+2 more]"), "{stdout}");
+    // The summary counts suppressed entries in the totals.
+    assert!(stdout.contains("4 files"), "{stdout}");
+    Ok(())
+}

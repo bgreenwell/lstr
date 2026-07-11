@@ -101,6 +101,14 @@ pub struct ViewArgs {
     /// Display directories only.
     #[arg(short = 'd', long)]
     pub dirs_only: bool,
+    /// Hide individual files below this depth, summarizing them per
+    /// directory as "[+N files]". Directories are always shown.
+    #[arg(long, value_name = "LEVEL")]
+    pub file_depth: Option<usize>,
+    /// Show at most this many entries per directory, summarizing the
+    /// rest as "[+N more]".
+    #[arg(long, value_name = "N")]
+    pub max_items: Option<usize>,
     /// Render file paths as clickable hyperlinks.
     #[arg(long)]
     pub hyperlinks: bool,

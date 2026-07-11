@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `--file-depth <LEVEL>` to hide individual files below a depth, summarized per directory as `[+N files]` — useful for high-level project overviews ([Closes #9](https://github.com/bgreenwell/lstr/issues/9))
+- Added `--max-items <N>` to cap entries shown per directory, summarizing the rest as `[+N more]` ([Closes #8](https://github.com/bgreenwell/lstr/issues/8))
 - Interactive mode now returns to the tree after closing the editor instead of exiting, preserving expansion and selection and picking up file changes ([Closes #3](https://github.com/bgreenwell/lstr/issues/3), [Closes #22](https://github.com/bgreenwell/lstr/issues/22))
 - Added `--editor <COMMAND>` to interactive mode for custom file openers, and `$VISUAL` is now honored before `$EDITOR` ([Closes #26](https://github.com/bgreenwell/lstr/issues/26))
 - Added `h`/`←` (collapse selected or parent directory) and `l`/`→` (expand/open) navigation keys in interactive mode ([Closes #41](https://github.com/bgreenwell/lstr/issues/41), thanks @Kr1ngl3)
