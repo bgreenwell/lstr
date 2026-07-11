@@ -79,7 +79,12 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     let git_repo_status =
         if args.common.git_status { git::load_status(&canonical_root)? } else { None };
     let status_cache = git_repo_status.as_ref().map(|s| &s.cache);
-    let repo_root = git_repo_status.as_ref().map(|s| &s.root);
+    // The walk root's location inside the repo, computed once so each
+    // entry's cache key is a cheap path join instead of a canonicalize()
+    // syscall per entry.
+    let root_in_repo = git_repo_status
+        .as_ref()
+        .and_then(|s| canonical_root.strip_prefix(&s.root).ok().map(|p| p.to_path_buf()));
 
     let mut builder = WalkBuilder::new(&args.common.path);
     utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
@@ -124,33 +129,28 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     for (index, entry) in entries.iter().enumerate() {
         let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
 
-        let git_status_str = if let (Some(cache), Some(root)) = (status_cache, repo_root) {
-            if let Ok(canonical_entry) = entry.path().canonicalize() {
-                if let Ok(relative_path) = canonical_entry.strip_prefix(root) {
-                    cache
-                        .get(relative_path)
-                        .map(|s| {
-                            let status_char = s.get_char();
-                            let color = match s {
-                                git::FileStatus::New | git::FileStatus::Renamed => {
-                                    colored::Color::Green
-                                }
-                                git::FileStatus::Modified | git::FileStatus::Typechange => {
-                                    colored::Color::Yellow
-                                }
-                                git::FileStatus::Deleted => colored::Color::Red,
-                                git::FileStatus::Conflicted => colored::Color::BrightRed,
-                                git::FileStatus::Untracked => colored::Color::Magenta,
-                            };
-                            format!("{status_char} ").color(color).to_string()
-                        })
-                        .unwrap_or_else(|| "  ".to_string())
-                } else {
-                    "  ".to_string()
-                }
-            } else {
-                "  ".to_string()
-            }
+        let git_status_str = if let (Some(cache), Some(base)) =
+            (status_cache, root_in_repo.as_ref())
+        {
+            entry
+                .path()
+                .strip_prefix(&args.common.path)
+                .ok()
+                .and_then(|rel| cache.get(&base.join(rel)))
+                .map(|s| {
+                    let status_char = s.get_char();
+                    let color = match s {
+                        git::FileStatus::New | git::FileStatus::Renamed => colored::Color::Green,
+                        git::FileStatus::Modified | git::FileStatus::Typechange => {
+                            colored::Color::Yellow
+                        }
+                        git::FileStatus::Deleted => colored::Color::Red,
+                        git::FileStatus::Conflicted => colored::Color::BrightRed,
+                        git::FileStatus::Untracked => colored::Color::Magenta,
+                    };
+                    format!("{status_char} ").color(color).to_string()
+                })
+                .unwrap_or_else(|| "  ".to_string())
         } else {
             String::new()
         };

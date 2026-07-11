@@ -60,8 +60,8 @@ pub struct SortOptions {
 ///
 /// # Examples
 ///
-/// ```rust
-/// use lstr::sort::{sort_entries, SortOptions, SortType};
+/// ```ignore
+/// use crate::sort::{sort_entries, SortOptions, SortType};
 ///
 /// let mut entries = vec![/* ... */];
 /// let options = SortOptions {
@@ -71,15 +71,62 @@ pub struct SortOptions {
 /// };
 /// sort_entries(&mut entries, &options);
 /// ```
-pub fn sort_entries(entries: &mut [DirEntry], options: &SortOptions) {
-    entries.sort_by(|a, b| {
-        let result = compare_entries(a, b, options);
+pub fn sort_entries(entries: &mut Vec<DirEntry>, options: &SortOptions) {
+    // Decorate-sort-undecorate: precompute each entry's sort key once so
+    // comparisons avoid repeated metadata syscalls and string allocations.
+    let mut decorated: Vec<(SortKey, DirEntry)> =
+        std::mem::take(entries).into_iter().map(|e| (SortKey::new(&e, options), e)).collect();
+    decorated.sort_by(|(key_a, a), (key_b, b)| {
+        let result = compare_keyed(key_a, a, key_b, b, options);
         if options.reverse {
             result.reverse()
         } else {
             result
         }
     });
+    entries.extend(decorated.into_iter().map(|(_, entry)| entry));
+}
+
+/// Per-entry data computed once before sorting. Only the fields relevant to
+/// the active options are filled; the rest stay at their cheap defaults.
+struct SortKey {
+    is_dir: bool,
+    is_dotfile: bool,
+    size: u64,
+    modified: Option<std::time::SystemTime>,
+    /// Lowercased file name for the default case-insensitive comparison
+    /// (also the tie-breaker for extension sorting).
+    name_lower: String,
+    extension: String,
+}
+
+impl SortKey {
+    fn new(entry: &DirEntry, options: &SortOptions) -> Self {
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        let is_dotfile = options.dotfiles_first && is_dotfile(entry);
+        let size = if options.sort_type == SortType::Size { get_entry_size(entry) } else { 0 };
+        let modified = if options.sort_type == SortType::Modified {
+            entry.metadata().ok().and_then(|m| m.modified().ok())
+        } else {
+            None
+        };
+        let name_lower = if !options.natural_sort && !options.case_sensitive {
+            entry.file_name().to_string_lossy().to_lowercase()
+        } else {
+            String::new()
+        };
+        let extension = if options.sort_type == SortType::Extension {
+            let ext = get_extension(entry.file_name());
+            if options.case_sensitive {
+                ext
+            } else {
+                ext.to_lowercase()
+            }
+        } else {
+            String::new()
+        };
+        Self { is_dir, is_dotfile, size, modified, name_lower, extension }
+    }
 }
 
 /// Sorts directory entries hierarchically, preserving tree structure.
@@ -94,62 +141,60 @@ pub fn sort_entries_hierarchically(entries: &mut Vec<DirEntry>, options: &SortOp
         return;
     }
 
-    // Build parent-child mapping
+    let total = entries.len();
+
+    // Move entries into per-parent buckets instead of cloning them.
     let mut children_map: HashMap<std::path::PathBuf, Vec<DirEntry>> = HashMap::new();
-    let mut all_entries_by_path: HashMap<std::path::PathBuf, DirEntry> = HashMap::new();
-
-    // Collect all entries and build parent-child relationships
-    for entry in entries.iter() {
-        all_entries_by_path.insert(entry.path().to_path_buf(), entry.clone());
-
-        if let Some(parent_path) = entry.path().parent() {
-            children_map.entry(parent_path.to_path_buf()).or_default().push(entry.clone());
+    let mut root_entries: Vec<DirEntry> = Vec::new();
+    for entry in entries.drain(..) {
+        // Root entries are at depth 1, since depth 0 (the walk root) is
+        // skipped by the callers.
+        if entry.depth() == 1 {
+            root_entries.push(entry);
+        } else if let Some(parent_path) = entry.path().parent() {
+            children_map.entry(parent_path.to_path_buf()).or_default().push(entry);
         }
     }
 
-    // Sort children within each parent directory
+    // Sort siblings within each parent directory
     for children in children_map.values_mut() {
         sort_entries(children, options);
     }
-
-    // Find root entries (depth 1, since we skip depth 0)
-    let mut root_entries: Vec<_> = entries.iter().filter(|e| e.depth() == 1).cloned().collect();
-
-    // Sort root entries
     sort_entries(&mut root_entries, options);
 
-    // Recursively collect entries in depth-first order
+    // Reassemble in depth-first order, moving entries back out of the map.
     fn collect_tree_entries(
-        entry: &DirEntry,
-        children_map: &HashMap<std::path::PathBuf, Vec<DirEntry>>,
+        entry: DirEntry,
+        children_map: &mut HashMap<std::path::PathBuf, Vec<DirEntry>>,
         result: &mut Vec<DirEntry>,
     ) {
-        // Add the parent entry
-        result.push(entry.clone());
-
-        // Add all its children in sorted order
-        if let Some(children) = children_map.get(entry.path()) {
+        let children = children_map.remove(entry.path());
+        result.push(entry);
+        if let Some(children) = children {
             for child in children {
                 collect_tree_entries(child, children_map, result);
             }
         }
     }
 
-    // Rebuild entries in proper tree order
-    let mut result = Vec::new();
-    for root in &root_entries {
-        collect_tree_entries(root, &children_map, &mut result);
+    let mut result = Vec::with_capacity(total);
+    for root in root_entries {
+        collect_tree_entries(root, &mut children_map, &mut result);
     }
 
     *entries = result;
 }
 
-/// Compares two directory entries according to the sorting options.
-pub fn compare_entries(a: &DirEntry, b: &DirEntry, options: &SortOptions) -> Ordering {
-    let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-    let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-    let a_is_dotfile = is_dotfile(a);
-    let b_is_dotfile = is_dotfile(b);
+/// Compares two directory entries using their precomputed sort keys.
+fn compare_keyed(
+    key_a: &SortKey,
+    a: &DirEntry,
+    key_b: &SortKey,
+    b: &DirEntry,
+    options: &SortOptions,
+) -> Ordering {
+    let (a_is_dir, a_is_dotfile) = (key_a.is_dir, key_a.is_dotfile);
+    let (b_is_dir, b_is_dotfile) = (key_b.is_dir, key_b.is_dotfile);
 
     // Handle dotfiles-first and directories-first sorting
     // Order: dotfolders → folders → dotfiles → files
@@ -180,64 +225,41 @@ pub fn compare_entries(a: &DirEntry, b: &DirEntry, options: &SortOptions) -> Ord
 
     // Apply the primary sorting strategy
     match options.sort_type {
-        SortType::Name => compare_by_name(a, b, options),
-        SortType::Size => compare_by_size(a, b),
-        SortType::Modified => compare_by_modified(a, b),
-        SortType::Extension => compare_by_extension(a, b, options),
+        SortType::Name => compare_by_name_keyed(key_a, a, key_b, b, options),
+        SortType::Size => key_a.size.cmp(&key_b.size),
+        SortType::Modified => match (key_a.modified, key_b.modified) {
+            (Some(a_time), Some(b_time)) => a_time.cmp(&b_time),
+            (Some(_), None) => Ordering::Less, // Files with known time sort first
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        },
+        SortType::Extension => {
+            let ext_cmp = key_a.extension.cmp(&key_b.extension);
+            // If extensions are equal, fall back to name comparison
+            if ext_cmp == Ordering::Equal {
+                compare_by_name_keyed(key_a, a, key_b, b, options)
+            } else {
+                ext_cmp
+            }
+        }
     }
 }
 
 /// Compares entries by name, handling case sensitivity and natural sorting.
-fn compare_by_name(a: &DirEntry, b: &DirEntry, options: &SortOptions) -> Ordering {
-    let name_a = a.file_name();
-    let name_b = b.file_name();
-
+fn compare_by_name_keyed(
+    key_a: &SortKey,
+    a: &DirEntry,
+    key_b: &SortKey,
+    b: &DirEntry,
+    options: &SortOptions,
+) -> Ordering {
     if options.natural_sort {
-        compare_natural(name_a, name_b)
+        compare_natural(a.file_name(), b.file_name())
     } else if options.case_sensitive {
         // Use default order for case-sensitive sorting (numbers, uppercase, lowercase)
-        compare_default_order(name_a, name_b)
+        compare_default_order(a.file_name(), b.file_name())
     } else {
-        compare_case_insensitive(name_a, name_b)
-    }
-}
-
-/// Compares entries by file size, with directories having size 0.
-fn compare_by_size(a: &DirEntry, b: &DirEntry) -> Ordering {
-    let size_a = get_entry_size(a);
-    let size_b = get_entry_size(b);
-    size_a.cmp(&size_b)
-}
-
-/// Compares entries by modification time.
-fn compare_by_modified(a: &DirEntry, b: &DirEntry) -> Ordering {
-    let modified_a = a.metadata().ok().and_then(|m| m.modified().ok());
-    let modified_b = b.metadata().ok().and_then(|m| m.modified().ok());
-
-    match (modified_a, modified_b) {
-        (Some(a_time), Some(b_time)) => a_time.cmp(&b_time),
-        (Some(_), None) => Ordering::Less, // Files with known time sort first
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-/// Compares entries by file extension, falling back to name comparison.
-fn compare_by_extension(a: &DirEntry, b: &DirEntry, options: &SortOptions) -> Ordering {
-    let ext_a = get_extension(a.file_name());
-    let ext_b = get_extension(b.file_name());
-
-    let ext_cmp = if options.case_sensitive {
-        ext_a.cmp(&ext_b)
-    } else {
-        compare_case_insensitive_str(&ext_a, &ext_b)
-    };
-
-    // If extensions are equal, fall back to name comparison
-    if ext_cmp == Ordering::Equal {
-        compare_by_name(a, b, options)
-    } else {
-        ext_cmp
+        key_a.name_lower.cmp(&key_b.name_lower)
     }
 }
 
@@ -252,6 +274,10 @@ fn compare_natural(a: &OsStr, b: &OsStr) -> Ordering {
 }
 
 /// Performs case-insensitive comparison on OS strings.
+///
+/// Production sorting compares precomputed `SortKey::name_lower` values;
+/// this helper documents and tests those semantics.
+#[cfg(test)]
 fn compare_case_insensitive(a: &OsStr, b: &OsStr) -> Ordering {
     let str_a = a.to_string_lossy().to_lowercase();
     let str_b = b.to_string_lossy().to_lowercase();
@@ -300,11 +326,6 @@ fn char_sort_priority(c: char) -> u8 {
 /// Checks if a directory entry is a dotfile/dotfolder (starts with '.').
 fn is_dotfile(entry: &DirEntry) -> bool {
     entry.file_name().to_string_lossy().starts_with('.')
-}
-
-/// Performs case-insensitive comparison on regular strings.
-fn compare_case_insensitive_str(a: &str, b: &str) -> Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase())
 }
 
 /// Extracts the file extension from an OS string, returning empty string if none.
