@@ -32,6 +32,21 @@ impl FileStatus {
             Self::Conflicted => 'C',
         }
     }
+
+    /// Relative severity used when propagating statuses to parent
+    /// directories; the higher value wins when a directory contains
+    /// files with different statuses.
+    fn severity(self) -> u8 {
+        match self {
+            Self::Conflicted => 6,
+            Self::Deleted => 5,
+            Self::Modified => 4,
+            Self::Typechange => 3,
+            Self::Renamed => 2,
+            Self::New => 1,
+            Self::Untracked => 0,
+        }
+    }
 }
 
 /// A cache mapping file paths to their Git status.
@@ -72,6 +87,29 @@ pub fn load_status(start_path: &Path) -> anyhow::Result<Option<GitRepoStatus>> {
         if let Some(path_str) = entry.path() {
             // Use the relative path directly as the key.
             cache.insert(PathBuf::from(path_str), status);
+        }
+    }
+
+    // Propagate each file's status to its ancestor directories so that
+    // folders containing changes get a marker too, with the most severe
+    // status winning.
+    let file_statuses: Vec<(PathBuf, FileStatus)> =
+        cache.iter().map(|(path, status)| (path.clone(), *status)).collect();
+    for (path, status) in file_statuses {
+        let mut ancestor = path.parent();
+        while let Some(dir) = ancestor {
+            if dir.as_os_str().is_empty() {
+                break;
+            }
+            cache
+                .entry(dir.to_path_buf())
+                .and_modify(|existing| {
+                    if status.severity() > existing.severity() {
+                        *existing = status;
+                    }
+                })
+                .or_insert(status);
+            ancestor = dir.parent();
         }
     }
 

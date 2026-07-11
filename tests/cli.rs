@@ -500,3 +500,128 @@ fn test_deep_nested_tree() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_ignore_files_only_respected_with_gitignore_flag() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp_dir = tempdir()?;
+    fs::write(temp_dir.path().join(".ignore"), "secret.txt\n")?;
+    fs::File::create(temp_dir.path().join("secret.txt"))?;
+    fs::File::create(temp_dir.path().join("visible.txt"))?;
+
+    // Without -g, ignore files must not filter the output.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("secret.txt"))
+        .stdout(predicate::str::contains("visible.txt"));
+
+    // With -g, .ignore files are respected like .gitignore.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-g").arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("visible.txt"))
+        .stdout(predicate::str::contains("secret.txt").not());
+    Ok(())
+}
+
+#[test]
+fn test_dirs_only_connectors() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("adir"))?;
+    fs::File::create(temp_dir.path().join("adir/inner.txt"))?;
+    fs::create_dir(temp_dir.path().join("bdir"))?;
+    fs::File::create(temp_dir.path().join("zfile.txt"))?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-d").arg(temp_dir.path());
+    // With files filtered out, the last *printed* entry must get the
+    // last-sibling connector, and no file may leak into the output.
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("├── adir"))
+        .stdout(predicate::str::contains("└── bdir"))
+        .stdout(predicate::str::contains("zfile").not())
+        .stdout(predicate::str::contains("inner").not());
+    Ok(())
+}
+
+#[test]
+#[cfg(unix)]
+fn test_permissions_show_symlink_type() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::File::create(temp_dir.path().join("target.txt"))?;
+    std::os::unix::fs::symlink("target.txt", temp_dir.path().join("link_to_target"))?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-p").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let link_line =
+        stdout.lines().find(|l| l.contains("link_to_target")).expect("symlink should be listed");
+    assert!(link_line.starts_with('l'), "symlink line should start with 'l': {link_line}");
+    let file_line =
+        stdout.lines().find(|l| l.contains("target.txt")).expect("file should be listed");
+    assert!(file_line.starts_with('-'), "file line should start with '-': {file_line}");
+    Ok(())
+}
+
+#[test]
+fn test_hyperlinks_follow_colorization() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::File::create(temp_dir.path().join("a.txt"))?;
+
+    // --color never must produce clean output with no OSC 8 escapes.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg("--color").arg("never").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8").not());
+
+    // Piped output (color auto) must also stay clean.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8").not());
+
+    // With colors forced on, hyperlinks are emitted.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg("--color").arg("always").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8"));
+    Ok(())
+}
+
+#[test]
+fn test_git_status_propagates_to_directories() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let temp_path = temp_dir.path();
+    Command::new("git").arg("init").current_dir(temp_path).output()?;
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(temp_path)
+        .output()?;
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(temp_path)
+        .output()?;
+
+    fs::create_dir(temp_path.join("subdir"))?;
+    fs::write(temp_path.join("subdir/inner.txt"), "one")?;
+    fs::write(temp_path.join("clean.txt"), "clean")?;
+    Command::new("git").args(["add", "."]).current_dir(temp_path).output()?;
+    Command::new("git").args(["commit", "-m", "init"]).current_dir(temp_path).output()?;
+    fs::write(temp_path.join("subdir/inner.txt"), "two")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-G").arg(temp_path);
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let dir_line = stdout.lines().find(|l| l.contains("subdir")).expect("subdir should be listed");
+    assert!(
+        dir_line.starts_with('M'),
+        "directory containing a modified file should show M: {dir_line}"
+    );
+    let clean_line =
+        stdout.lines().find(|l| l.contains("clean.txt")).expect("clean.txt should be listed");
+    assert!(clean_line.starts_with("  "), "clean file should have no marker: {clean_line}");
+    Ok(())
+}

@@ -1,6 +1,61 @@
 //! Shared utility functions for the lstr application.
 
-// This entire module will only be compiled on Unix-like systems.
+/// Configures a directory walker's filtering to match the CLI contract:
+/// hidden files are shown only with `-a`, and `.gitignore` plus the other
+/// standard ignore files (`.ignore`, global gitignore, `.git/info/exclude`,
+/// ignore files in parent directories) apply only with `-g`.
+///
+/// `WalkBuilder` enables all of these filters by default, so each one must
+/// be tied to the flags explicitly.
+pub fn configure_ignore_filters(builder: &mut ignore::WalkBuilder, all: bool, gitignore: bool) {
+    builder
+        .standard_filters(false)
+        .hidden(!all)
+        .parents(gitignore)
+        .ignore(gitignore)
+        .git_ignore(gitignore)
+        .git_global(gitignore)
+        .git_exclude(gitignore);
+}
+
+/// Returns a copy of `path` suitable for display, converting Windows
+/// verbatim paths (`\\?\C:\...` and `\\?\UNC\server\share\...`) produced by
+/// `fs::canonicalize` back to their conventional form. On other platforms
+/// the path is returned unchanged.
+pub fn display_path(path: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsString;
+        use std::path::{Component, Prefix};
+
+        let mut components = path.components();
+        let Some(Component::Prefix(prefix)) = components.next() else {
+            return path.to_path_buf();
+        };
+        let root = match prefix.kind() {
+            Prefix::VerbatimDisk(disk) => std::path::PathBuf::from(format!(r"{}:\", disk as char)),
+            Prefix::VerbatimUNC(server, share) => {
+                let mut s = OsString::from(r"\\");
+                s.push(server);
+                s.push(r"\");
+                s.push(share);
+                std::path::PathBuf::from(s)
+            }
+            _ => return path.to_path_buf(),
+        };
+        let mut result = root;
+        for component in components {
+            if component != Component::RootDir {
+                result.push(component.as_os_str());
+            }
+        }
+        result
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
 
 /// Formats a size in bytes into a human-readable string using binary prefixes (KiB, MiB).
 pub fn format_size(bytes: u64) -> String {
@@ -24,18 +79,58 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// Formats a Unix file mode into a human-readable string (e.g., "rwxr-xr-x").
+/// Formats a file's metadata as an `ls -l`-style permission string,
+/// including the file-type character (`d`, `l`, or `-`).
+///
+/// On non-Unix platforms this returns a `"----------"` placeholder.
+pub fn permission_string(metadata: &std::fs::Metadata) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let type_char = if metadata.file_type().is_symlink() {
+            'l'
+        } else if metadata.is_dir() {
+            'd'
+        } else {
+            '-'
+        };
+        format!("{}{}", type_char, format_permissions(metadata.permissions().mode()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        "----------".to_string()
+    }
+}
+
+/// Formats a Unix file mode into a human-readable string (e.g., "rwxr-xr-x"),
+/// including the setuid (`s`/`S`), setgid (`s`/`S`), and sticky (`t`/`T`) bits.
 #[cfg(unix)]
 pub fn format_permissions(mode: u32) -> String {
     let user_r = if mode & 0o400 != 0 { 'r' } else { '-' };
     let user_w = if mode & 0o200 != 0 { 'w' } else { '-' };
-    let user_x = if mode & 0o100 != 0 { 'x' } else { '-' };
+    let user_x = match (mode & 0o100 != 0, mode & 0o4000 != 0) {
+        (true, true) => 's',
+        (false, true) => 'S',
+        (true, false) => 'x',
+        (false, false) => '-',
+    };
     let group_r = if mode & 0o040 != 0 { 'r' } else { '-' };
     let group_w = if mode & 0o020 != 0 { 'w' } else { '-' };
-    let group_x = if mode & 0o010 != 0 { 'x' } else { '-' };
+    let group_x = match (mode & 0o010 != 0, mode & 0o2000 != 0) {
+        (true, true) => 's',
+        (false, true) => 'S',
+        (true, false) => 'x',
+        (false, false) => '-',
+    };
     let other_r = if mode & 0o004 != 0 { 'r' } else { '-' };
     let other_w = if mode & 0o002 != 0 { 'w' } else { '-' };
-    let other_x = if mode & 0o001 != 0 { 'x' } else { '-' };
+    let other_x = match (mode & 0o001 != 0, mode & 0o1000 != 0) {
+        (true, true) => 't',
+        (false, true) => 'T',
+        (true, false) => 'x',
+        (false, false) => '-',
+    };
     format!("{user_r}{user_w}{user_x}{group_r}{group_w}{group_x}{other_r}{other_w}{other_x}")
 }
 
@@ -68,5 +163,44 @@ mod tests {
         // -rwx------
         let mode_user_only = 0o700;
         assert_eq!(format_permissions(mode_user_only), "rwx------");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_display_path_strips_verbatim_prefix() {
+        use std::path::Path;
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\Users\test\file.txt")),
+            Path::new(r"C:\Users\test\file.txt")
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\dir")),
+            Path::new(r"\\server\share\dir")
+        );
+        // Conventional and relative paths pass through unchanged.
+        assert_eq!(display_path(Path::new(r"C:\normal\path")), Path::new(r"C:\normal\path"));
+        assert_eq!(display_path(Path::new(r"relative\path")), Path::new(r"relative\path"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_display_path_is_identity_on_non_windows() {
+        use std::path::Path;
+        assert_eq!(display_path(Path::new("/usr/local/bin")), Path::new("/usr/local/bin"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_format_permissions_special_bits() {
+        // setuid with execute (e.g. /usr/bin/sudo)
+        assert_eq!(format_permissions(0o4755), "rwsr-xr-x");
+        // setuid without execute
+        assert_eq!(format_permissions(0o4655), "rwSr-xr-x");
+        // setgid with execute
+        assert_eq!(format_permissions(0o2755), "rwxr-sr-x");
+        // sticky bit with execute (e.g. /tmp)
+        assert_eq!(format_permissions(0o1777), "rwxrwxrwt");
+        // sticky bit without execute
+        assert_eq!(format_permissions(0o1776), "rwxrwxrwT");
     }
 }

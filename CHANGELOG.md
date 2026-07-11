@@ -26,7 +26,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status line shows current search query and match count
   - Preserves tree structure and selection state during filtering ([Closes #30](https://github.com/bgreenwell/lstr/issues/30))
 
+### Added
+
+- Directories now show the most severe git status of their contents with `-G`, in both classic and interactive modes
+
+### Changed
+
+- File permissions now display `l` for symlinks and the setuid/setgid/sticky special bits (`s`/`S`, `t`/`T`)
+- Improved sorting performance: metadata lookups and string allocations now happen once per entry instead of once per comparison (`--sort modified` on a 40k-entry tree: ~2.6× faster)
+- Improved `-G` git-status performance in classic mode by removing a filesystem canonicalization syscall per entry (~2× faster on a 10k-file repository)
+
 ### Fixed
+
+- Fixed hyperlink escape sequences being emitted under `--color never` and into pipes; hyperlinks now follow the colorization decision
+- Fixed the TUI capturing mouse events it never handled, which broke click-drag text selection in the terminal
+- Fixed interactive mode printing Windows `\\?\` verbatim paths from Ctrl+s ([Closes #24](https://github.com/bgreenwell/lstr/issues/24))
+- Fixed wrong tree connectors with `--dirs-only`, where a directory could render `├──` because filtered-out files after it were counted as siblings
+- Fixed quadratic tree-connector computation that made large directory trees (tens of thousands of entries) take seconds instead of milliseconds
+- Fixed ignore files (`.ignore`, global gitignore, `.git/info/exclude`) filtering output even without the `-g` flag; all standard ignore filters are now tied to `-g` in both classic and interactive modes
+- Fixed the interactive TUI quitting when typing `q` (or other command keys) into a search query
+- Fixed a crash when navigating an empty directory or empty search results in interactive mode
+- Fixed the terminal being left in raw mode on the alternate screen when the TUI exited with an error or panic
+- Fixed expanding a directory during search corrupting the restored file list; search mode now exits before toggling
+- Fixed search rejecting printable punctuation characters (e.g. `+`, `#`, `(`) in filenames
+- Fixed the selection jumping to an unrelated entry after exiting search mode
 
 - **CRITICAL**: Fixed fundamental tree structure corruption caused by flat sorting destroying parent-child relationships. Implemented tree-aware hierarchical sorting that preserves proper tree traversal order while sorting siblings within their respective parent directories. This resolves multiple cascading issues:
   - Fixed tree display connector issue where all entries showed `└──` instead of proper mixed `├──` and `└──` connectors ([Closes #36](https://github.com/bgreenwell/lstr/issues/36))

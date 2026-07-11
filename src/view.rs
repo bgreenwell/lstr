@@ -12,17 +12,13 @@ use std::fs;
 use std::io::{self, Write};
 use url::Url;
 
-// Platform-specific import for unix permissions
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 /// Executes the classic directory tree view
 pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
-    if !args.path.is_dir() {
-        anyhow::bail!("'{}' is not a directory.", args.path.display());
+    if !args.common.path.is_dir() {
+        anyhow::bail!("'{}' is not a directory.", args.common.path.display());
     }
 
-    let canonical_root = fs::canonicalize(&args.path)?;
+    let canonical_root = fs::canonicalize(&args.common.path)?;
 
     match args.color {
         crate::app::ColorChoice::Always => control::set_override(true),
@@ -31,55 +27,52 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     }
 
     // Format root directory with same alignment as tree entries
-    let root_metadata = if args.size || args.permissions { 
-        fs::metadata(&args.path).ok() 
-    } else { 
-        None 
+    let root_metadata = if args.common.size || args.common.permissions {
+        fs::metadata(&args.common.path).ok()
+    } else {
+        None
     };
-    
-    let root_permissions_str = if args.permissions {
-        let perms = if let Some(md) = &root_metadata {
-            #[cfg(unix)]
-            {
-                let mode = md.permissions().mode();
-                let file_type_char = if md.is_dir() { 'd' } else { '-' };
-                format!("{}{}", file_type_char, utils::format_permissions(mode))
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = md;
-                "----------".to_string()
-            }
-        } else {
-            "----------".to_string()
-        };
+
+    let root_permissions_str = if args.common.permissions {
+        let perms = root_metadata
+            .as_ref()
+            .map(utils::permission_string)
+            .unwrap_or_else(|| "----------".to_string());
         format!("{perms} ")
     } else {
         String::new()
     };
-    
-    let root_git_status_str = if args.git_status {
+
+    let root_git_status_str = if args.common.git_status {
         "  ".to_string() // Empty git status column for consistent spacing
     } else {
         String::new()
     };
-    
+
     if writeln!(
-        io::stdout(), 
+        io::stdout(),
         "{}{}{}",
         root_git_status_str,
-        root_permissions_str, 
-        args.path.display().to_string().blue().bold()
-    ).is_err() {
+        root_permissions_str,
+        args.common.path.display().to_string().blue().bold()
+    )
+    .is_err()
+    {
         return Ok(());
     }
 
-    let git_repo_status = if args.git_status { git::load_status(&canonical_root)? } else { None };
+    let git_repo_status =
+        if args.common.git_status { git::load_status(&canonical_root)? } else { None };
     let status_cache = git_repo_status.as_ref().map(|s| &s.cache);
-    let repo_root = git_repo_status.as_ref().map(|s| &s.root);
+    // The walk root's location inside the repo, computed once so each
+    // entry's cache key is a cheap path join instead of a canonicalize()
+    // syscall per entry.
+    let root_in_repo = git_repo_status
+        .as_ref()
+        .and_then(|s| canonical_root.strip_prefix(&s.root).ok().map(|p| p.to_path_buf()));
 
-    let mut builder = WalkBuilder::new(&args.path);
-    builder.hidden(!args.all).git_ignore(args.gitignore);
+    let mut builder = WalkBuilder::new(&args.common.path);
+    utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
     if let Some(level) = args.level {
         builder.max_depth(Some(level));
     }
@@ -105,8 +98,14 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         })
         .collect();
 
+    // Filter before computing tree connectors so that skipped entries do
+    // not count as siblings of the entries that are actually printed.
+    if args.dirs_only {
+        entries.retain(|entry| entry.file_type().is_some_and(|ft| ft.is_dir()));
+    }
+
     // Apply tree-aware sorting (preserves parent-child relationships)
-    let sort_options = args.to_sort_options();
+    let sort_options = args.common.to_sort_options();
     sort::sort_entries_hierarchically(&mut entries, &sort_options);
 
     // Build tree structure information
@@ -114,76 +113,54 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
     for (index, entry) in entries.iter().enumerate() {
         let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-        if args.dirs_only && !is_dir {
-            continue;
-        }
 
-        let git_status_str = if let (Some(cache), Some(root)) = (status_cache, repo_root) {
-            if let Ok(canonical_entry) = entry.path().canonicalize() {
-                if let Ok(relative_path) = canonical_entry.strip_prefix(root) {
-                    cache
-                        .get(relative_path)
-                        .map(|s| {
-                            let status_char = s.get_char();
-                            let color = match s {
-                                git::FileStatus::New | git::FileStatus::Renamed => {
-                                    colored::Color::Green
-                                }
-                                git::FileStatus::Modified | git::FileStatus::Typechange => {
-                                    colored::Color::Yellow
-                                }
-                                git::FileStatus::Deleted => colored::Color::Red,
-                                git::FileStatus::Conflicted => colored::Color::BrightRed,
-                                git::FileStatus::Untracked => colored::Color::Magenta,
-                            };
-                            format!("{status_char} ").color(color).to_string()
-                        })
-                        .unwrap_or_else(|| "  ".to_string())
-                } else {
-                    "  ".to_string()
-                }
-            } else {
-                "  ".to_string()
-            }
+        let git_status_str = if let (Some(cache), Some(base)) =
+            (status_cache, root_in_repo.as_ref())
+        {
+            entry
+                .path()
+                .strip_prefix(&args.common.path)
+                .ok()
+                .and_then(|rel| cache.get(&base.join(rel)))
+                .map(|s| {
+                    let status_char = s.get_char();
+                    let color = match s {
+                        git::FileStatus::New | git::FileStatus::Renamed => colored::Color::Green,
+                        git::FileStatus::Modified | git::FileStatus::Typechange => {
+                            colored::Color::Yellow
+                        }
+                        git::FileStatus::Deleted => colored::Color::Red,
+                        git::FileStatus::Conflicted => colored::Color::BrightRed,
+                        git::FileStatus::Untracked => colored::Color::Magenta,
+                    };
+                    format!("{status_char} ").color(color).to_string()
+                })
+                .unwrap_or_else(|| "  ".to_string())
         } else {
             String::new()
         };
 
-        let metadata = if args.size || args.permissions { entry.metadata().ok() } else { None };
-        let permissions_str = if args.permissions {
-            let perms = if let Some(md) = &metadata {
-                // <-- Use 'md' here
-                #[cfg(unix)]
-                {
-                    // Use 'md' for Unix-specific logic
-                    let mode = md.permissions().mode();
-                    let file_type_char = if md.is_dir() { 'd' } else { '-' };
-                    format!("{}{}", file_type_char, utils::format_permissions(mode))
-                }
-                #[cfg(not(unix))]
-                {
-                    // This line tells the compiler we've intentionally not used 'md' on non-Unix systems
-                    let _ = md;
-                    "----------".to_string()
-                }
-            } else {
-                "----------".to_string()
-            };
+        let metadata =
+            if args.common.size || args.common.permissions { entry.metadata().ok() } else { None };
+        let permissions_str = if args.common.permissions {
+            let perms = metadata
+                .as_ref()
+                .map(utils::permission_string)
+                .unwrap_or_else(|| "----------".to_string());
             format!("{perms} ")
         } else {
             String::new()
         };
 
-        let default_tree_info = (String::new(), "└──".to_string());
-        let (prefix, connector) = tree_info.get(&index).unwrap_or(&default_tree_info);
+        let (prefix, connector) = &tree_info[index];
         let name = entry.file_name().to_string_lossy();
-        let icon_str = if args.icons {
+        let icon_str = if args.common.icons {
             let (icon, color) = icons::get_icon_for_path(entry.path(), is_dir);
             format!("{} ", icon.color(color))
         } else {
             String::new()
         };
-        let size_str = if args.size && !is_dir {
+        let size_str = if args.common.size && !is_dir {
             metadata
                 .as_ref()
                 .map(|m| format!(" ({})", utils::format_size(m.len())))
@@ -231,7 +208,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             styled_name = styled_name.underline();
         }
 
-        let final_name = if args.hyperlinks && !is_dir {
+        // Hyperlink escapes follow the colorization decision so that
+        // `--color never` and piped output stay clean, pipeable text.
+        let final_name = if args.hyperlinks && !is_dir && control::SHOULD_COLORIZE.should_colorize()
+        {
             // Canonicalize the path to get an absolute path for the URL
             if let Ok(abs_path) = fs::canonicalize(entry.path()) {
                 if let Ok(url) = Url::from_file_path(abs_path) {
@@ -275,59 +255,43 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Builds tree structure information for proper connector display.
+/// Returns one (prefix, connector) pair per entry, in entry order.
+///
+/// Entries must be in depth-first order (each entry's parent precedes it),
+/// which `sort_entries_hierarchically` guarantees. Under that invariant an
+/// entry is the last of its siblings exactly when the next entry at a depth
+/// less than or equal to its own is strictly shallower, so everything can be
+/// computed in two linear passes instead of rescanning the list per entry.
+fn build_tree_info(entries: &[ignore::DirEntry]) -> Vec<(String, &'static str)> {
+    // Reverse pass: pending[d] is true when a later entry at depth d exists
+    // within the same parent scope (deeper flags are cleared whenever a
+    // shallower entry is seen, since those entries belong to its subtree).
+    let mut is_last = vec![false; entries.len()];
+    let mut pending: Vec<bool> = Vec::new();
+    for (index, entry) in entries.iter().enumerate().rev() {
+        let depth = entry.depth();
+        if pending.len() <= depth {
+            pending.resize(depth + 1, false);
+        } else {
+            pending.truncate(depth + 1);
+        }
+        is_last[index] = !pending[depth];
+        pending[depth] = true;
+    }
 
-/// Builds tree structure information for proper connector display
-/// Returns a map from entry index to (prefix, connector) tuple  
-fn build_tree_info(
-    entries: &[ignore::DirEntry],
-) -> std::collections::HashMap<usize, (String, String)> {
-    use std::collections::HashMap;
-
-    let mut tree_info = HashMap::new();
-
+    // Forward pass: build each entry's prefix from its ancestors' last-sibling
+    // flags, maintained as a stack indexed by depth.
+    let mut tree_info = Vec::with_capacity(entries.len());
+    let mut prefix_parts: Vec<&'static str> = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let depth = entry.depth();
-        let mut prefix = String::new();
-
-        // Build prefix by walking up the tree and checking each ancestor
-        let current_path = entry.path();
-
-        // For each depth level from 1 to current depth - 1
-        for level in 1..depth {
-            // Find the ancestor directory at this level
-            let ancestor_path = {
-                let mut path = current_path;
-                for _ in level..depth {
-                    if let Some(parent) = path.parent() {
-                        path = parent;
-                    }
-                }
-                path
-            };
-
-            // Check if this ancestor has more siblings coming after it
-            let has_more_siblings = entries.iter().enumerate().any(|(later_index, later_entry)| {
-                later_index > index && // Must come after current entry
-                    later_entry.depth() == level && // Same depth as ancestor
-                    later_entry.path().parent() == ancestor_path.parent() // Same parent as ancestor
-            });
-
-            if has_more_siblings {
-                prefix.push_str("│   ");
-            } else {
-                prefix.push_str("    ");
-            }
-        }
-
-        // Determine connector for this entry (├── vs └──)
-        let is_last_sibling = !entries.iter().enumerate().any(|(later_index, later_entry)| {
-            later_index > index && // Must come after current entry
-                later_entry.depth() == depth && // Same depth
-                later_entry.path().parent() == entry.path().parent() // Same parent
-        });
-
-        let connector = if is_last_sibling { "└──" } else { "├──" };
-        tree_info.insert(index, (prefix, connector.to_string()));
+        prefix_parts.truncate(depth.saturating_sub(1));
+        let prefix = prefix_parts.concat();
+        let connector = if is_last[index] { "└──" } else { "├──" };
+        // How this entry contributes to its descendants' prefixes.
+        prefix_parts.push(if is_last[index] { "    " } else { "│   " });
+        tree_info.push((prefix, connector));
     }
 
     tree_info
