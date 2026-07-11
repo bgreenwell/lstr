@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `h`/`←` (collapse selected or parent directory) and `l`/`→` (expand/open) navigation keys in interactive mode ([Closes #41](https://github.com/bgreenwell/lstr/issues/41), thanks @Kr1ngl3)
 - Directories now show the most severe git status of their contents with `-G`, in both classic and interactive modes
 
 ### Changed
