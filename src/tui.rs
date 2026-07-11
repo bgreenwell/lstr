@@ -13,8 +13,7 @@ use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
     cursor,
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers,
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -597,9 +596,9 @@ type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;
 fn restore_terminal_state(use_stderr: bool) {
     let _ = disable_raw_mode();
     if use_stderr {
-        let _ = execute!(stderr(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+        let _ = execute!(stderr(), LeaveAlternateScreen, cursor::Show);
     } else {
-        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+        let _ = execute!(stdout(), LeaveAlternateScreen, cursor::Show);
     }
 }
 
@@ -633,7 +632,7 @@ fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)>
     enable_raw_mode()?;
     let guard = TerminalGuard { use_stderr };
     let mut writer_mut = writer;
-    execute!(writer_mut, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(writer_mut, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(writer_mut);
     Ok((Terminal::new(backend)?, guard))
 }
