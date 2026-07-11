@@ -3,12 +3,14 @@
 //! This module implements various sorting strategies for file and directory entries,
 //! ensuring consistent behavior across all supported platforms (Windows, macOS, Linux).
 
+use clap::ValueEnum;
 use ignore::DirEntry;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
+use std::fmt;
 
 /// Defines the available sorting strategies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum SortType {
     /// Sort by name (default)
     #[default]
@@ -19,6 +21,13 @@ pub enum SortType {
     Modified,
     /// Sort by file extension
     Extension,
+}
+
+/// Implements the Display trait for SortType to show possible values in help messages.
+impl fmt::Display for SortType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value().expect("no values are skipped").get_name().fmt(f)
+    }
 }
 
 /// Configuration options for sorting directory entries.

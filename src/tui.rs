@@ -117,7 +117,8 @@ struct AppState {
 
 impl AppState {
     fn new(args: &InteractiveArgs, root_path: &Path) -> anyhow::Result<Self> {
-        let git_repo_status = if args.git_status { git::load_status(root_path)? } else { None };
+        let git_repo_status =
+            if args.common.git_status { git::load_status(root_path)? } else { None };
 
         let status_info = git_repo_status.as_ref().map(|s| (&s.cache, &s.root));
         let mut master_entries = scan_directory(root_path, status_info, args)?;
@@ -319,10 +320,10 @@ impl AppState {
 }
 
 pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
-    if !args.path.is_dir() {
-        anyhow::bail!("'{}' is not a directory.", args.path.display());
+    if !args.common.path.is_dir() {
+        anyhow::bail!("'{}' is not a directory.", args.common.path.display());
     }
-    let root_path = fs::canonicalize(&args.path)?;
+    let root_path = fs::canonicalize(&args.common.path)?;
 
     let mut app_state = AppState::new(args, &root_path)?;
     let (mut terminal, guard) = setup_terminal()?;
@@ -430,7 +431,7 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
         .iter()
         .map(|entry| {
             let mut spans = Vec::new();
-            if args.git_status {
+            if args.common.git_status {
                 let (status_char, status_color) = if let Some(status) = entry.git_status {
                     let color = match status {
                         git::FileStatus::New | git::FileStatus::Renamed => Color::Green,
@@ -448,7 +449,7 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
                     Style::default().fg(status_color),
                 ));
             }
-            if args.permissions {
+            if args.common.permissions {
                 let perms_str = entry.permissions.as_deref().unwrap_or("----------");
                 spans.push(Span::styled(
                     format!("{perms_str} "),
@@ -467,7 +468,7 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
                 "  "
             };
             spans.push(Span::raw(branch_str));
-            if args.icons {
+            if args.common.icons {
                 let (icon, color) = icons::get_icon_for_path(&entry.path, entry.is_dir);
                 spans.push(Span::styled(format!("{icon} "), Style::default().fg(map_color(color))));
             }
@@ -478,7 +479,7 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
             let name_span = Span::styled(name.to_string(), ratatui_style);
             spans.push(name_span);
 
-            if args.size && !entry.is_dir {
+            if args.common.size && !entry.is_dir {
                 if let Some(size) = entry.size {
                     let size_str = utils::format_size(size);
                     let left_len: usize = spans.iter().map(|s| s.width()).sum();
@@ -529,28 +530,30 @@ fn scan_directory(
     args: &InteractiveArgs,
 ) -> anyhow::Result<Vec<FileEntry>> {
     let mut builder = WalkBuilder::new(path);
-    utils::configure_ignore_filters(&mut builder, args.all, args.gitignore);
+    utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
 
     // Collect all DirEntry objects first, filtering out the root path
     let mut dir_entries: Vec<_> =
         builder.build().flatten().filter(|result| result.path() != path).collect();
 
     // Apply tree-aware sorting to preserve parent-child relationships
-    let sort_options = args.to_sort_options();
+    let sort_options = args.common.to_sort_options();
     sort::sort_entries_hierarchically(&mut dir_entries, &sort_options);
 
     // Convert DirEntry objects to FileEntry objects
     let mut entries = Vec::new();
     for result in dir_entries {
-        let metadata = if args.size || args.permissions { result.metadata().ok() } else { None };
+        let metadata =
+            if args.common.size || args.common.permissions { result.metadata().ok() } else { None };
         let is_dir = result.file_type().is_some_and(|ft| ft.is_dir());
         let git_status = if let Some((cache, root)) = status_info {
             result.path().strip_prefix(root).ok().and_then(|rel_path| cache.get(rel_path)).copied()
         } else {
             None
         };
-        let size = if args.size && !is_dir { metadata.as_ref().map(|m| m.len()) } else { None };
-        let permissions = if args.permissions {
+        let size =
+            if args.common.size && !is_dir { metadata.as_ref().map(|m| m.len()) } else { None };
+        let permissions = if args.common.permissions {
             metadata.map(|_md| {
                 #[cfg(unix)]
                 {
