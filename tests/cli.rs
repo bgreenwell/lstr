@@ -567,3 +567,25 @@ fn test_permissions_show_symlink_type() -> Result<(), Box<dyn std::error::Error>
     assert!(file_line.starts_with('-'), "file line should start with '-': {file_line}");
     Ok(())
 }
+
+#[test]
+fn test_hyperlinks_follow_colorization() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::File::create(temp_dir.path().join("a.txt"))?;
+
+    // --color never must produce clean output with no OSC 8 escapes.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg("--color").arg("never").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8").not());
+
+    // Piped output (color auto) must also stay clean.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8").not());
+
+    // With colors forced on, hyperlinks are emitted.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--hyperlinks").arg("--color").arg("always").arg(temp_dir.path());
+    cmd.assert().success().stdout(predicate::str::contains("\x1b]8"));
+    Ok(())
+}

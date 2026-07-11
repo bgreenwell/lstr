@@ -208,7 +208,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             styled_name = styled_name.underline();
         }
 
-        let final_name = if args.hyperlinks && !is_dir {
+        // Hyperlink escapes follow the colorization decision so that
+        // `--color never` and piped output stay clean, pipeable text.
+        let final_name = if args.hyperlinks && !is_dir && control::SHOULD_COLORIZE.should_colorize()
+        {
             // Canonicalize the path to get an absolute path for the URL
             if let Ok(abs_path) = fs::canonicalize(entry.path()) {
                 if let Ok(url) = Url::from_file_path(abs_path) {
