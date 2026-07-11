@@ -38,6 +38,14 @@ The easiest way to install `lstr` on macOS is with Homebrew.
 brew install lstr
 ```
 
+### Arch Linux (AUR)
+
+A community-maintained [`lstr-git`](https://aur.archlinux.org/packages/lstr-git) package (thanks, [@bakatrouble](https://github.com/bakatrouble)!) builds the latest commit from this repository. Install it with your preferred AUR helper, e.g.:
+
+```bash
+paru -S lstr-git
+```
+
 ### From source (all platforms)
 
 You need the Rust toolchain installed on your system to build `lstr`.
