@@ -18,11 +18,11 @@ use std::os::unix::fs::PermissionsExt;
 
 /// Executes the classic directory tree view
 pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
-    if !args.path.is_dir() {
-        anyhow::bail!("'{}' is not a directory.", args.path.display());
+    if !args.common.path.is_dir() {
+        anyhow::bail!("'{}' is not a directory.", args.common.path.display());
     }
 
-    let canonical_root = fs::canonicalize(&args.path)?;
+    let canonical_root = fs::canonicalize(&args.common.path)?;
 
     match args.color {
         crate::app::ColorChoice::Always => control::set_override(true),
@@ -31,10 +31,13 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     }
 
     // Format root directory with same alignment as tree entries
-    let root_metadata =
-        if args.size || args.permissions { fs::metadata(&args.path).ok() } else { None };
+    let root_metadata = if args.common.size || args.common.permissions {
+        fs::metadata(&args.common.path).ok()
+    } else {
+        None
+    };
 
-    let root_permissions_str = if args.permissions {
+    let root_permissions_str = if args.common.permissions {
         let perms = if let Some(md) = &root_metadata {
             #[cfg(unix)]
             {
@@ -55,7 +58,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         String::new()
     };
 
-    let root_git_status_str = if args.git_status {
+    let root_git_status_str = if args.common.git_status {
         "  ".to_string() // Empty git status column for consistent spacing
     } else {
         String::new()
@@ -66,19 +69,20 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         "{}{}{}",
         root_git_status_str,
         root_permissions_str,
-        args.path.display().to_string().blue().bold()
+        args.common.path.display().to_string().blue().bold()
     )
     .is_err()
     {
         return Ok(());
     }
 
-    let git_repo_status = if args.git_status { git::load_status(&canonical_root)? } else { None };
+    let git_repo_status =
+        if args.common.git_status { git::load_status(&canonical_root)? } else { None };
     let status_cache = git_repo_status.as_ref().map(|s| &s.cache);
     let repo_root = git_repo_status.as_ref().map(|s| &s.root);
 
-    let mut builder = WalkBuilder::new(&args.path);
-    utils::configure_ignore_filters(&mut builder, args.all, args.gitignore);
+    let mut builder = WalkBuilder::new(&args.common.path);
+    utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
     if let Some(level) = args.level {
         builder.max_depth(Some(level));
     }
@@ -111,7 +115,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     }
 
     // Apply tree-aware sorting (preserves parent-child relationships)
-    let sort_options = args.to_sort_options();
+    let sort_options = args.common.to_sort_options();
     sort::sort_entries_hierarchically(&mut entries, &sort_options);
 
     // Build tree structure information
@@ -151,8 +155,9 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        let metadata = if args.size || args.permissions { entry.metadata().ok() } else { None };
-        let permissions_str = if args.permissions {
+        let metadata =
+            if args.common.size || args.common.permissions { entry.metadata().ok() } else { None };
+        let permissions_str = if args.common.permissions {
             let perms = if let Some(md) = &metadata {
                 // <-- Use 'md' here
                 #[cfg(unix)]
@@ -178,13 +183,13 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
         let (prefix, connector) = &tree_info[index];
         let name = entry.file_name().to_string_lossy();
-        let icon_str = if args.icons {
+        let icon_str = if args.common.icons {
             let (icon, color) = icons::get_icon_for_path(entry.path(), is_dir);
             format!("{} ", icon.color(color))
         } else {
             String::new()
         };
-        let size_str = if args.size && !is_dir {
+        let size_str = if args.common.size && !is_dir {
             metadata
                 .as_ref()
                 .map(|m| format!(" ({})", utils::format_size(m.len())))
