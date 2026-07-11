@@ -526,3 +526,24 @@ fn test_ignore_files_only_respected_with_gitignore_flag() -> Result<(), Box<dyn 
         .stdout(predicate::str::contains("secret.txt").not());
     Ok(())
 }
+
+#[test]
+fn test_dirs_only_connectors() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("adir"))?;
+    fs::File::create(temp_dir.path().join("adir/inner.txt"))?;
+    fs::create_dir(temp_dir.path().join("bdir"))?;
+    fs::File::create(temp_dir.path().join("zfile.txt"))?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-d").arg(temp_dir.path());
+    // With files filtered out, the last *printed* entry must get the
+    // last-sibling connector, and no file may leak into the output.
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("├── adir"))
+        .stdout(predicate::str::contains("└── bdir"))
+        .stdout(predicate::str::contains("zfile").not())
+        .stdout(predicate::str::contains("inner").not());
+    Ok(())
+}

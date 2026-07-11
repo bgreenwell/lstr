@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed wrong tree connectors with `--dirs-only`, where a directory could render `├──` because filtered-out files after it were counted as siblings
+- Fixed quadratic tree-connector computation that made large directory trees (tens of thousands of entries) take seconds instead of milliseconds
 - Fixed ignore files (`.ignore`, global gitignore, `.git/info/exclude`) filtering output even without the `-g` flag; all standard ignore filters are now tied to `-g` in both classic and interactive modes
 - Fixed the interactive TUI quitting when typing `q` (or other command keys) into a search query
 - Fixed a crash when navigating an empty directory or empty search results in interactive mode

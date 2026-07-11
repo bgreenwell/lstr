@@ -104,6 +104,12 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         })
         .collect();
 
+    // Filter before computing tree connectors so that skipped entries do
+    // not count as siblings of the entries that are actually printed.
+    if args.dirs_only {
+        entries.retain(|entry| entry.file_type().is_some_and(|ft| ft.is_dir()));
+    }
+
     // Apply tree-aware sorting (preserves parent-child relationships)
     let sort_options = args.to_sort_options();
     sort::sort_entries_hierarchically(&mut entries, &sort_options);
@@ -113,9 +119,6 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
     for (index, entry) in entries.iter().enumerate() {
         let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-        if args.dirs_only && !is_dir {
-            continue;
-        }
 
         let git_status_str = if let (Some(cache), Some(root)) = (status_cache, repo_root) {
             if let Ok(canonical_entry) = entry.path().canonicalize() {
@@ -173,8 +176,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        let default_tree_info = (String::new(), "└──".to_string());
-        let (prefix, connector) = tree_info.get(&index).unwrap_or(&default_tree_info);
+        let (prefix, connector) = &tree_info[index];
         let name = entry.file_name().to_string_lossy();
         let icon_str = if args.icons {
             let (icon, color) = icons::get_icon_for_path(entry.path(), is_dir);
@@ -274,58 +276,43 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Builds tree structure information for proper connector display
-/// Returns a map from entry index to (prefix, connector) tuple  
-fn build_tree_info(
-    entries: &[ignore::DirEntry],
-) -> std::collections::HashMap<usize, (String, String)> {
-    use std::collections::HashMap;
+/// Builds tree structure information for proper connector display.
+/// Returns one (prefix, connector) pair per entry, in entry order.
+///
+/// Entries must be in depth-first order (each entry's parent precedes it),
+/// which `sort_entries_hierarchically` guarantees. Under that invariant an
+/// entry is the last of its siblings exactly when the next entry at a depth
+/// less than or equal to its own is strictly shallower, so everything can be
+/// computed in two linear passes instead of rescanning the list per entry.
+fn build_tree_info(entries: &[ignore::DirEntry]) -> Vec<(String, &'static str)> {
+    // Reverse pass: pending[d] is true when a later entry at depth d exists
+    // within the same parent scope (deeper flags are cleared whenever a
+    // shallower entry is seen, since those entries belong to its subtree).
+    let mut is_last = vec![false; entries.len()];
+    let mut pending: Vec<bool> = Vec::new();
+    for (index, entry) in entries.iter().enumerate().rev() {
+        let depth = entry.depth();
+        if pending.len() <= depth {
+            pending.resize(depth + 1, false);
+        } else {
+            pending.truncate(depth + 1);
+        }
+        is_last[index] = !pending[depth];
+        pending[depth] = true;
+    }
 
-    let mut tree_info = HashMap::new();
-
+    // Forward pass: build each entry's prefix from its ancestors' last-sibling
+    // flags, maintained as a stack indexed by depth.
+    let mut tree_info = Vec::with_capacity(entries.len());
+    let mut prefix_parts: Vec<&'static str> = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let depth = entry.depth();
-        let mut prefix = String::new();
-
-        // Build prefix by walking up the tree and checking each ancestor
-        let current_path = entry.path();
-
-        // For each depth level from 1 to current depth - 1
-        for level in 1..depth {
-            // Find the ancestor directory at this level
-            let ancestor_path = {
-                let mut path = current_path;
-                for _ in level..depth {
-                    if let Some(parent) = path.parent() {
-                        path = parent;
-                    }
-                }
-                path
-            };
-
-            // Check if this ancestor has more siblings coming after it
-            let has_more_siblings = entries.iter().enumerate().any(|(later_index, later_entry)| {
-                later_index > index && // Must come after current entry
-                    later_entry.depth() == level && // Same depth as ancestor
-                    later_entry.path().parent() == ancestor_path.parent() // Same parent as ancestor
-            });
-
-            if has_more_siblings {
-                prefix.push_str("│   ");
-            } else {
-                prefix.push_str("    ");
-            }
-        }
-
-        // Determine connector for this entry (├── vs └──)
-        let is_last_sibling = !entries.iter().enumerate().any(|(later_index, later_entry)| {
-            later_index > index && // Must come after current entry
-                later_entry.depth() == depth && // Same depth
-                later_entry.path().parent() == entry.path().parent() // Same parent
-        });
-
-        let connector = if is_last_sibling { "└──" } else { "├──" };
-        tree_info.insert(index, (prefix, connector.to_string()));
+        prefix_parts.truncate(depth.saturating_sub(1));
+        let prefix = prefix_parts.concat();
+        let connector = if is_last[index] { "└──" } else { "├──" };
+        // How this entry contributes to its descendants' prefixes.
+        prefix_parts.push(if is_last[index] { "    " } else { "│   " });
+        tree_info.push((prefix, connector));
     }
 
     tree_info
