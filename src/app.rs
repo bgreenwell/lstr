@@ -115,6 +115,10 @@ pub struct InteractiveArgs {
     /// Initial depth to expand the directory tree.
     #[arg(long, value_name = "LEVEL")]
     pub expand_level: Option<usize>,
+    /// Command used to open files, overriding $VISUAL and $EDITOR.
+    /// Split on whitespace; the file path is appended as the last argument.
+    #[arg(long, value_name = "COMMAND")]
+    pub editor: Option<String>,
 }
 
 /// Defines the choices for the --color option.
