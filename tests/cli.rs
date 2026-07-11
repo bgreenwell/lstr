@@ -500,3 +500,29 @@ fn test_deep_nested_tree() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_ignore_files_only_respected_with_gitignore_flag() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp_dir = tempdir()?;
+    fs::write(temp_dir.path().join(".ignore"), "secret.txt\n")?;
+    fs::File::create(temp_dir.path().join("secret.txt"))?;
+    fs::File::create(temp_dir.path().join("visible.txt"))?;
+
+    // Without -g, ignore files must not filter the output.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("secret.txt"))
+        .stdout(predicate::str::contains("visible.txt"));
+
+    // With -g, .ignore files are respected like .gitignore.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-g").arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("visible.txt"))
+        .stdout(predicate::str::contains("secret.txt").not());
+    Ok(())
+}

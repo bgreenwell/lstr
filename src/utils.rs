@@ -1,6 +1,22 @@
 //! Shared utility functions for the lstr application.
 
-// This entire module will only be compiled on Unix-like systems.
+/// Configures a directory walker's filtering to match the CLI contract:
+/// hidden files are shown only with `-a`, and `.gitignore` plus the other
+/// standard ignore files (`.ignore`, global gitignore, `.git/info/exclude`,
+/// ignore files in parent directories) apply only with `-g`.
+///
+/// `WalkBuilder` enables all of these filters by default, so each one must
+/// be tied to the flags explicitly.
+pub fn configure_ignore_filters(builder: &mut ignore::WalkBuilder, all: bool, gitignore: bool) {
+    builder
+        .standard_filters(false)
+        .hidden(!all)
+        .parents(gitignore)
+        .ignore(gitignore)
+        .git_ignore(gitignore)
+        .git_global(gitignore)
+        .git_exclude(gitignore);
+}
 
 /// Formats a size in bytes into a human-readable string using binary prefixes (KiB, MiB).
 pub fn format_size(bytes: u64) -> String {

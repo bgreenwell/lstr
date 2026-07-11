@@ -78,7 +78,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     let repo_root = git_repo_status.as_ref().map(|s| &s.root);
 
     let mut builder = WalkBuilder::new(&args.path);
-    builder.hidden(!args.all).git_ignore(args.gitignore);
+    utils::configure_ignore_filters(&mut builder, args.all, args.gitignore);
     if let Some(level) = args.level {
         builder.max_depth(Some(level));
     }
