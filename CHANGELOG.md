@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the interactive TUI quitting when typing `q` (or other command keys) into a search query
+- Fixed a crash when navigating an empty directory or empty search results in interactive mode
+- Fixed the terminal being left in raw mode on the alternate screen when the TUI exited with an error or panic
+- Fixed expanding a directory during search corrupting the restored file list; search mode now exits before toggling
+- Fixed search rejecting printable punctuation characters (e.g. `+`, `#`, `(`) in filenames
+- Fixed the selection jumping to an unrelated entry after exiting search mode
+
 - **CRITICAL**: Fixed fundamental tree structure corruption caused by flat sorting destroying parent-child relationships. Implemented tree-aware hierarchical sorting that preserves proper tree traversal order while sorting siblings within their respective parent directories. This resolves multiple cascading issues:
   - Fixed tree display connector issue where all entries showed `└──` instead of proper mixed `├──` and `└──` connectors ([Closes #36](https://github.com/bgreenwell/lstr/issues/36))
   - Fixed incorrect file nesting where children appeared under wrong parents or in jumbled order
