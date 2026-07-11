@@ -33,10 +33,6 @@ use std::io::{stderr, stdout, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Platform-specific import for unix permissions
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 /// Converts an lscolors::Style to a ratatui::style::Style
 fn to_ratatui_style(ls_style: LsStyle) -> Style {
     let mut style = Style::default();
@@ -554,18 +550,7 @@ fn scan_directory(
         let size =
             if args.common.size && !is_dir { metadata.as_ref().map(|m| m.len()) } else { None };
         let permissions = if args.common.permissions {
-            metadata.map(|_md| {
-                #[cfg(unix)]
-                {
-                    let mode = _md.permissions().mode();
-                    let file_type_char = if _md.is_dir() { 'd' } else { '-' };
-                    format!("{}{}", file_type_char, utils::format_permissions(mode))
-                }
-                #[cfg(not(unix))]
-                {
-                    "----------".to_string()
-                }
-            })
+            metadata.as_ref().map(utils::permission_string)
         } else {
             None
         };

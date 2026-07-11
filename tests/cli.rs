@@ -547,3 +547,23 @@ fn test_dirs_only_connectors() -> Result<(), Box<dyn std::error::Error>> {
         .stdout(predicate::str::contains("inner").not());
     Ok(())
 }
+
+#[test]
+#[cfg(unix)]
+fn test_permissions_show_symlink_type() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::File::create(temp_dir.path().join("target.txt"))?;
+    std::os::unix::fs::symlink("target.txt", temp_dir.path().join("link_to_target"))?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-p").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let link_line =
+        stdout.lines().find(|l| l.contains("link_to_target")).expect("symlink should be listed");
+    assert!(link_line.starts_with('l'), "symlink line should start with 'l': {link_line}");
+    let file_line =
+        stdout.lines().find(|l| l.contains("target.txt")).expect("file should be listed");
+    assert!(file_line.starts_with('-'), "file line should start with '-': {file_line}");
+    Ok(())
+}

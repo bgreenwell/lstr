@@ -12,10 +12,6 @@ use std::fs;
 use std::io::{self, Write};
 use url::Url;
 
-// Platform-specific import for unix permissions
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 /// Executes the classic directory tree view
 pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     if !args.common.path.is_dir() {
@@ -38,21 +34,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     };
 
     let root_permissions_str = if args.common.permissions {
-        let perms = if let Some(md) = &root_metadata {
-            #[cfg(unix)]
-            {
-                let mode = md.permissions().mode();
-                let file_type_char = if md.is_dir() { 'd' } else { '-' };
-                format!("{}{}", file_type_char, utils::format_permissions(mode))
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = md;
-                "----------".to_string()
-            }
-        } else {
-            "----------".to_string()
-        };
+        let perms = root_metadata
+            .as_ref()
+            .map(utils::permission_string)
+            .unwrap_or_else(|| "----------".to_string());
         format!("{perms} ")
     } else {
         String::new()
@@ -158,24 +143,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         let metadata =
             if args.common.size || args.common.permissions { entry.metadata().ok() } else { None };
         let permissions_str = if args.common.permissions {
-            let perms = if let Some(md) = &metadata {
-                // <-- Use 'md' here
-                #[cfg(unix)]
-                {
-                    // Use 'md' for Unix-specific logic
-                    let mode = md.permissions().mode();
-                    let file_type_char = if md.is_dir() { 'd' } else { '-' };
-                    format!("{}{}", file_type_char, utils::format_permissions(mode))
-                }
-                #[cfg(not(unix))]
-                {
-                    // This line tells the compiler we've intentionally not used 'md' on non-Unix systems
-                    let _ = md;
-                    "----------".to_string()
-                }
-            } else {
-                "----------".to_string()
-            };
+            let perms = metadata
+                .as_ref()
+                .map(utils::permission_string)
+                .unwrap_or_else(|| "----------".to_string());
             format!("{perms} ")
         } else {
             String::new()
