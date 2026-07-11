@@ -12,10 +12,7 @@ use ignore::WalkBuilder;
 use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
     cursor,
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers,
-    },
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -32,10 +29,6 @@ use std::fs;
 use std::io::{stderr, stdout, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-// Platform-specific import for unix permissions
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 /// Converts an lscolors::Style to a ratatui::style::Style
 fn to_ratatui_style(ls_style: LsStyle) -> Style {
@@ -340,10 +333,10 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
                     "vim".to_string()
                 }
             });
-            Command::new(editor).arg(path).status()?;
+            Command::new(editor).arg(utils::display_path(&path)).status()?;
         }
         PostExitAction::PrintPath(path) => {
-            println!("{}", path.display());
+            println!("{}", utils::display_path(&path).display());
         }
         PostExitAction::None => {}
     }
@@ -554,18 +547,7 @@ fn scan_directory(
         let size =
             if args.common.size && !is_dir { metadata.as_ref().map(|m| m.len()) } else { None };
         let permissions = if args.common.permissions {
-            metadata.map(|_md| {
-                #[cfg(unix)]
-                {
-                    let mode = _md.permissions().mode();
-                    let file_type_char = if _md.is_dir() { 'd' } else { '-' };
-                    format!("{}{}", file_type_char, utils::format_permissions(mode))
-                }
-                #[cfg(not(unix))]
-                {
-                    "----------".to_string()
-                }
-            })
+            metadata.as_ref().map(utils::permission_string)
         } else {
             None
         };
@@ -612,9 +594,9 @@ type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;
 fn restore_terminal_state(use_stderr: bool) {
     let _ = disable_raw_mode();
     if use_stderr {
-        let _ = execute!(stderr(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+        let _ = execute!(stderr(), LeaveAlternateScreen, cursor::Show);
     } else {
-        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+        let _ = execute!(stdout(), LeaveAlternateScreen, cursor::Show);
     }
 }
 
@@ -648,7 +630,7 @@ fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)>
     enable_raw_mode()?;
     let guard = TerminalGuard { use_stderr };
     let mut writer_mut = writer;
-    execute!(writer_mut, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(writer_mut, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(writer_mut);
     Ok((Terminal::new(backend)?, guard))
 }

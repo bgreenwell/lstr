@@ -26,13 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status line shows current search query and match count
   - Preserves tree structure and selection state during filtering ([Closes #30](https://github.com/bgreenwell/lstr/issues/30))
 
+### Added
+
+- Directories now show the most severe git status of their contents with `-G`, in both classic and interactive modes
+
 ### Changed
 
+- File permissions now display `l` for symlinks and the setuid/setgid/sticky special bits (`s`/`S`, `t`/`T`)
 - Improved sorting performance: metadata lookups and string allocations now happen once per entry instead of once per comparison (`--sort modified` on a 40k-entry tree: ~2.6× faster)
 - Improved `-G` git-status performance in classic mode by removing a filesystem canonicalization syscall per entry (~2× faster on a 10k-file repository)
 
 ### Fixed
 
+- Fixed hyperlink escape sequences being emitted under `--color never` and into pipes; hyperlinks now follow the colorization decision
+- Fixed the TUI capturing mouse events it never handled, which broke click-drag text selection in the terminal
+- Fixed interactive mode printing Windows `\\?\` verbatim paths from Ctrl+s ([Closes #24](https://github.com/bgreenwell/lstr/issues/24))
 - Fixed wrong tree connectors with `--dirs-only`, where a directory could render `├──` because filtered-out files after it were counted as siblings
 - Fixed quadratic tree-connector computation that made large directory trees (tens of thousands of entries) take seconds instead of milliseconds
 - Fixed ignore files (`.ignore`, global gitignore, `.git/info/exclude`) filtering output even without the `-g` flag; all standard ignore filters are now tied to `-g` in both classic and interactive modes
