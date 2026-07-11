@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status line shows current search query and match count
   - Preserves tree structure and selection state during filtering ([Closes #30](https://github.com/bgreenwell/lstr/issues/30))
 
+### Changed
+
+- Improved sorting performance: metadata lookups and string allocations now happen once per entry instead of once per comparison (`--sort modified` on a 40k-entry tree: ~2.6× faster)
+- Improved `-G` git-status performance in classic mode by removing a filesystem canonicalization syscall per entry (~2× faster on a 10k-file repository)
+
 ### Fixed
 
 - Fixed wrong tree connectors with `--dirs-only`, where a directory could render `├──` because filtered-out files after it were counted as siblings
