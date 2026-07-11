@@ -115,6 +115,7 @@ Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.
 | `/` | Search: filter entries by name as you type. `Esc` exits search. |
 | `q` / `Esc` | Quit the application normally. |
 | `Ctrl`+`s` | **Shell integration:** Quits and prints the selected path to stdout. |
+| Mouse | Scroll wheel moves the selection; click selects a row; clicking the selected entry activates it (open file / toggle directory). Hold `Shift` for normal terminal text selection. |
 
 ## Examples
 

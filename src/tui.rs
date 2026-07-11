@@ -12,7 +12,10 @@ use ignore::WalkBuilder;
 use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -444,12 +447,20 @@ fn run_app<B: Backend + Write>(
     loop {
         terminal.draw(|f| ui(f, app_state, args, ls_colors))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
                 if let Some(action) = handle_key(app_state, key) {
                     break Ok(action);
                 }
             }
+            Event::Mouse(mouse) => {
+                // The last row is the status line; everything above is list.
+                let list_height = terminal.size()?.height.saturating_sub(1);
+                if let Some(action) = handle_mouse(app_state, mouse, list_height) {
+                    break Ok(action);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -486,6 +497,50 @@ fn handle_key(app_state: &mut AppState, key: KeyEvent) -> Option<PostExitAction>
         KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
         KeyCode::Left | KeyCode::Char('h') => app_state.close_encompassing_directory(),
         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => return handle_enter(app_state),
+        _ => {}
+    }
+    None
+}
+
+/// Processes a mouse event, returning `Some` when the TUI should exit.
+/// The scroll wheel moves the selection (without wrapping), a click selects
+/// the row under the cursor, and a click on the already-selected entry
+/// activates it like Enter.
+fn handle_mouse(
+    app_state: &mut AppState,
+    mouse: MouseEvent,
+    list_height: u16,
+) -> Option<PostExitAction> {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => match app_state.list_state.selected() {
+            Some(i) if i + 1 < app_state.visible_entries.len() => {
+                app_state.list_state.select(Some(i + 1));
+            }
+            Some(_) => {}
+            None => app_state.next(),
+        },
+        MouseEventKind::ScrollUp => {
+            if let Some(i) = app_state.list_state.selected() {
+                if i > 0 {
+                    app_state.list_state.select(Some(i - 1));
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Rows past the list area belong to the status line.
+            if mouse.row >= list_height {
+                return None;
+            }
+            let index = app_state.list_state.offset() + mouse.row as usize;
+            if index >= app_state.visible_entries.len() {
+                return None;
+            }
+            if app_state.list_state.selected() == Some(index) {
+                // A second click on the same entry activates it.
+                return handle_enter(app_state);
+            }
+            app_state.list_state.select(Some(index));
+        }
         _ => {}
     }
     None
@@ -686,9 +741,9 @@ type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;
 fn restore_terminal_state(use_stderr: bool) {
     let _ = disable_raw_mode();
     if use_stderr {
-        let _ = execute!(stderr(), LeaveAlternateScreen, cursor::Show);
+        let _ = execute!(stderr(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
     } else {
-        let _ = execute!(stdout(), LeaveAlternateScreen, cursor::Show);
+        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
     }
 }
 
@@ -727,7 +782,7 @@ fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)>
     enable_raw_mode()?;
     let guard = TerminalGuard { use_stderr };
     let mut writer_mut = writer;
-    execute!(writer_mut, EnterAlternateScreen)?;
+    execute!(writer_mut, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(writer_mut);
     Ok((Terminal::new(backend)?, guard))
 }
@@ -926,6 +981,57 @@ mod tests {
         let mut app_state = setup_test_app_state();
         let action = handle_key(&mut app_state, key(KeyCode::Esc));
         assert!(matches!(action, Some(PostExitAction::None)));
+    }
+
+    fn click(row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn scroll(kind: MouseEventKind) -> MouseEvent {
+        MouseEvent { kind, column: 0, row: 0, modifiers: KeyModifiers::NONE }
+    }
+
+    #[test]
+    fn test_click_selects_row_and_second_click_activates() {
+        let mut app_state = setup_test_app_state();
+        assert_eq!(app_state.list_state.selected(), Some(0));
+        // Click on row 1 (README.md) selects it.
+        assert!(handle_mouse(&mut app_state, click(1), 20).is_none());
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+        // Second click on the same row opens the file.
+        let action = handle_mouse(&mut app_state, click(1), 20);
+        assert!(matches!(action, Some(PostExitAction::OpenFile(_))));
+        // Second click on a directory toggles it instead.
+        handle_mouse(&mut app_state, click(0), 20);
+        assert!(handle_mouse(&mut app_state, click(0), 20).is_none());
+        assert_eq!(app_state.visible_entries.len(), 3);
+    }
+
+    #[test]
+    fn test_click_outside_list_is_noop() {
+        let mut app_state = setup_test_app_state();
+        // Row beyond the entries but inside the list area.
+        assert!(handle_mouse(&mut app_state, click(10), 20).is_none());
+        assert_eq!(app_state.list_state.selected(), Some(0));
+        // Row on the status line (list_height and beyond).
+        assert!(handle_mouse(&mut app_state, click(1), 1).is_none());
+        assert_eq!(app_state.list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_scroll_moves_selection_without_wrapping() {
+        let mut app_state = setup_test_app_state();
+        handle_mouse(&mut app_state, scroll(MouseEventKind::ScrollUp), 20);
+        assert_eq!(app_state.list_state.selected(), Some(0)); // no wrap at top
+        handle_mouse(&mut app_state, scroll(MouseEventKind::ScrollDown), 20);
+        assert_eq!(app_state.list_state.selected(), Some(1));
+        handle_mouse(&mut app_state, scroll(MouseEventKind::ScrollDown), 20);
+        assert_eq!(app_state.list_state.selected(), Some(1)); // no wrap at bottom
     }
 
     #[test]
