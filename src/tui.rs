@@ -11,6 +11,7 @@ use crate::utils;
 use ignore::WalkBuilder;
 use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
+    cursor,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
@@ -305,9 +306,10 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     let root_path = fs::canonicalize(&args.path)?;
 
     let mut app_state = AppState::new(args, &root_path)?;
-    let mut terminal = setup_terminal()?;
-    let post_exit_action = run_app(&mut terminal, &mut app_state, args, ls_colors)?;
-    restore_terminal(&mut terminal)?;
+    let (mut terminal, guard) = setup_terminal()?;
+    let run_result = run_app(&mut terminal, &mut app_state, args, ls_colors);
+    drop(guard);
+    let post_exit_action = run_result?;
 
     match post_exit_action {
         PostExitAction::OpenFile(path) => {
@@ -570,21 +572,51 @@ fn map_color(c: colored::Color) -> Color {
 
 type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;
 
-fn setup_terminal() -> anyhow::Result<Terminal<TerminalWriter>> {
+/// Restores the terminal to its normal state (cooked mode, main screen, visible
+/// cursor). Best-effort and idempotent so it is safe from both the drop guard
+/// and the panic hook.
+fn restore_terminal_state(use_stderr: bool) {
+    let _ = disable_raw_mode();
+    if use_stderr {
+        let _ = execute!(stderr(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+    } else {
+        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+    }
+}
+
+/// Restores the terminal when dropped, covering `?` early returns from the
+/// event loop. Panics are handled separately by the hook installed in
+/// `setup_terminal`, since the release profile uses `panic = "abort"` and
+/// never unwinds into destructors.
+struct TerminalGuard {
+    use_stderr: bool,
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal_state(self.use_stderr);
+    }
+}
+
+fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)> {
+    let use_stderr = !stdout().is_terminal();
     let writer: Box<dyn Write + Send> =
-        if stdout().is_terminal() { Box::new(stdout()) } else { Box::new(stderr()) };
+        if use_stderr { Box::new(stderr()) } else { Box::new(stdout()) };
+
+    // Restore the terminal before the default panic handler prints, so the
+    // message is readable and the user's shell is not left in raw mode.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal_state(use_stderr);
+        default_hook(info);
+    }));
+
     enable_raw_mode()?;
+    let guard = TerminalGuard { use_stderr };
     let mut writer_mut = writer;
     execute!(writer_mut, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(writer_mut);
-    Terminal::new(backend).map_err(anyhow::Error::from)
-}
-
-fn restore_terminal<B: Backend + Write>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-    terminal.show_cursor()?;
-    Ok(())
+    Ok((Terminal::new(backend)?, guard))
 }
 
 #[cfg(test)]
