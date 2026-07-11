@@ -11,8 +11,10 @@ use crate::utils;
 use ignore::WalkBuilder;
 use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
+    cursor,
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -160,6 +162,10 @@ impl AppState {
     }
 
     fn next(&mut self) {
+        if self.visible_entries.is_empty() {
+            self.list_state.select(None);
+            return;
+        }
         let i = match self.list_state.selected() {
             Some(i) => {
                 if i >= self.visible_entries.len() - 1 {
@@ -174,6 +180,10 @@ impl AppState {
     }
 
     fn previous(&mut self) {
+        if self.visible_entries.is_empty() {
+            self.list_state.select(None);
+            return;
+        }
         let i = match self.list_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -193,7 +203,11 @@ impl AppState {
 
     fn toggle_selected_directory(&mut self) {
         if let Some(selected_index) = self.list_state.selected() {
-            let selected_path = self.visible_entries[selected_index].path.clone();
+            let Some(selected_path) =
+                self.visible_entries.get(selected_index).map(|e| e.path.clone())
+            else {
+                return;
+            };
             if let Some(master_entry) =
                 self.master_entries.iter_mut().find(|e| e.path == selected_path)
             {
@@ -206,10 +220,19 @@ impl AppState {
                 self.visible_entries.iter().position(|e| e.path == selected_path)
             {
                 self.list_state.select(Some(new_index));
+            } else if self.visible_entries.is_empty() {
+                self.list_state.select(None);
             } else {
                 let new_selection = selected_index.min(self.visible_entries.len() - 1);
                 self.list_state.select(Some(new_selection));
             }
+        }
+    }
+
+    /// Selects the entry with the given path, if it is currently visible.
+    fn select_path(&mut self, path: &Path) {
+        if let Some(index) = self.visible_entries.iter().position(|e| e.path == path) {
+            self.list_state.select(Some(index));
         }
     }
 
@@ -222,26 +245,20 @@ impl AppState {
         self.search_query.clear();
     }
 
-
     /// Exit search/filter mode and restore original view
     fn exit_search_mode(&mut self) {
         if self.search_mode != SearchMode::None {
-            self.visible_entries = self.original_visible_entries.clone();
-            self.original_visible_entries.clear();
+            let selected_path = self.get_selected_entry().map(|e| e.path.clone());
+            self.visible_entries = std::mem::take(&mut self.original_visible_entries);
             self.search_mode = SearchMode::None;
             self.search_query.clear();
-            
-            // Restore selection to valid index
-            if let Some(selected) = self.list_state.selected() {
-                if selected >= self.visible_entries.len() {
-                    let new_selection = if self.visible_entries.is_empty() {
-                        None
-                    } else {
-                        Some(self.visible_entries.len() - 1)
-                    };
-                    self.list_state.select(new_selection);
-                }
-            }
+
+            // Keep the entry that was highlighted in the filtered list
+            // selected in the restored list.
+            let selection = selected_path
+                .and_then(|path| self.visible_entries.iter().position(|e| e.path == path))
+                .or(if self.visible_entries.is_empty() { None } else { Some(0) });
+            self.list_state.select(selection);
         }
     }
 
@@ -274,10 +291,12 @@ impl AppState {
         } else {
             // Filter entries based on search query (case-insensitive filename match)
             let query_lower = self.search_query.to_lowercase();
-            self.visible_entries = self.original_visible_entries
+            self.visible_entries = self
+                .original_visible_entries
                 .iter()
                 .filter(|entry| {
-                    entry.path
+                    entry
+                        .path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .map(|name| name.to_lowercase().contains(&query_lower))
@@ -286,16 +305,14 @@ impl AppState {
                 .cloned()
                 .collect();
         }
-        
-        // Reset selection to first item if current selection is out of bounds
-        if let Some(selected) = self.list_state.selected() {
-            if selected >= self.visible_entries.len() {
-                let new_selection = if self.visible_entries.is_empty() {
-                    None
-                } else {
-                    Some(0)
-                };
-                self.list_state.select(new_selection);
+
+        // Keep the selection in bounds; select the first match when the
+        // previous selection is gone (or reappears after a backspace).
+        match self.list_state.selected() {
+            Some(selected) if selected < self.visible_entries.len() => {}
+            _ => {
+                let selection = if self.visible_entries.is_empty() { None } else { Some(0) };
+                self.list_state.select(selection);
             }
         }
     }
@@ -308,9 +325,10 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     let root_path = fs::canonicalize(&args.path)?;
 
     let mut app_state = AppState::new(args, &root_path)?;
-    let mut terminal = setup_terminal()?;
-    let post_exit_action = run_app(&mut terminal, &mut app_state, args, ls_colors)?;
-    restore_terminal(&mut terminal)?;
+    let (mut terminal, guard) = setup_terminal()?;
+    let run_result = run_app(&mut terminal, &mut app_state, args, ls_colors);
+    drop(guard);
+    let post_exit_action = run_result?;
 
     match post_exit_action {
         PostExitAction::OpenFile(path) => {
@@ -343,46 +361,65 @@ fn run_app<B: Backend + Write>(
 
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('s') if key.modifiers == KeyModifiers::CONTROL => {
-                        if let Some(entry) = app_state.get_selected_entry() {
-                            break Ok(PostExitAction::PrintPath(entry.path.clone()));
-                        }
-                    }
-                    KeyCode::Char('q') => {
-                        break Ok(PostExitAction::None);
-                    }
-                    KeyCode::Esc => {
-                        if app_state.in_search_mode() {
-                            app_state.exit_search_mode();
-                        } else {
-                            break Ok(PostExitAction::None);
-                        }
-                    }
-                    KeyCode::Char('/') if !app_state.in_search_mode() => {
-                        app_state.enter_search_mode();
-                    }
-                    KeyCode::Backspace if app_state.in_search_mode() => {
-                        app_state.remove_from_query();
-                    }
-                    KeyCode::Char(c) if app_state.in_search_mode() && (c.is_alphanumeric() || c == '.' || c == '_' || c == '-' || c == ' ') => {
-                        app_state.append_to_query(c);
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => app_state.next(),
-                    KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
-                    KeyCode::Enter => {
-                        if let Some(entry) = app_state.get_selected_entry() {
-                            if entry.is_dir {
-                                app_state.toggle_selected_directory();
-                            } else {
-                                break Ok(PostExitAction::OpenFile(entry.path.clone()));
-                            }
-                        }
-                    }
-                    _ => {}
+                if let Some(action) = handle_key(app_state, key) {
+                    break Ok(action);
                 }
             }
         }
+    }
+}
+
+/// Processes a single key press, returning `Some` when the TUI should exit.
+fn handle_key(app_state: &mut AppState, key: KeyEvent) -> Option<PostExitAction> {
+    if key.code == KeyCode::Char('s') && key.modifiers == KeyModifiers::CONTROL {
+        return app_state.get_selected_entry().map(|e| PostExitAction::PrintPath(e.path.clone()));
+    }
+
+    // Search-mode input is handled first so that typed characters go into
+    // the query instead of triggering command keys like 'q', 'j', or 'k'.
+    if app_state.in_search_mode() {
+        match key.code {
+            KeyCode::Esc => app_state.exit_search_mode(),
+            KeyCode::Backspace => app_state.remove_from_query(),
+            KeyCode::Down => app_state.next(),
+            KeyCode::Up => app_state.previous(),
+            KeyCode::Enter => return handle_enter(app_state),
+            KeyCode::Char(c)
+                if !c.is_control() && (key.modifiers - KeyModifiers::SHIFT).is_empty() =>
+            {
+                app_state.append_to_query(c);
+            }
+            _ => {}
+        }
+        return None;
+    }
+
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => return Some(PostExitAction::None),
+        KeyCode::Char('/') => app_state.enter_search_mode(),
+        KeyCode::Down | KeyCode::Char('j') => app_state.next(),
+        KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
+        KeyCode::Enter => return handle_enter(app_state),
+        _ => {}
+    }
+    None
+}
+
+/// Handles Enter on the selected entry: toggles directories, opens files.
+fn handle_enter(app_state: &mut AppState) -> Option<PostExitAction> {
+    let entry = app_state.get_selected_entry()?;
+    let (path, is_dir) = (entry.path.clone(), entry.is_dir);
+    if is_dir {
+        // Expanding changes which entries exist, so leave search mode
+        // (restoring the full list) before toggling.
+        if app_state.in_search_mode() {
+            app_state.exit_search_mode();
+            app_state.select_path(&path);
+        }
+        app_state.toggle_selected_directory();
+        None
+    } else {
+        Some(PostExitAction::OpenFile(path))
     }
 }
 
@@ -458,8 +495,8 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0),     // Main area (flexible)
-            Constraint::Length(1),  // Status line (1 row)
+            Constraint::Min(0),    // Main area (flexible)
+            Constraint::Length(1), // Status line (1 row)
         ])
         .split(f.size());
 
@@ -478,12 +515,11 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
         "Press / to search, q to quit".to_string()
     };
 
-    let status_paragraph = Paragraph::new(status_text)
-        .style(if app_state.in_search_mode() { 
-            Style::default().fg(Color::Yellow) 
-        } else { 
-            Style::default().fg(Color::Gray) 
-        });
+    let status_paragraph = Paragraph::new(status_text).style(if app_state.in_search_mode() {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    });
     f.render_widget(status_paragraph, chunks[1]);
 }
 
@@ -567,21 +603,51 @@ fn map_color(c: colored::Color) -> Color {
 
 type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;
 
-fn setup_terminal() -> anyhow::Result<Terminal<TerminalWriter>> {
+/// Restores the terminal to its normal state (cooked mode, main screen, visible
+/// cursor). Best-effort and idempotent so it is safe from both the drop guard
+/// and the panic hook.
+fn restore_terminal_state(use_stderr: bool) {
+    let _ = disable_raw_mode();
+    if use_stderr {
+        let _ = execute!(stderr(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+    } else {
+        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, cursor::Show);
+    }
+}
+
+/// Restores the terminal when dropped, covering `?` early returns from the
+/// event loop. Panics are handled separately by the hook installed in
+/// `setup_terminal`, since the release profile uses `panic = "abort"` and
+/// never unwinds into destructors.
+struct TerminalGuard {
+    use_stderr: bool,
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal_state(self.use_stderr);
+    }
+}
+
+fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)> {
+    let use_stderr = !stdout().is_terminal();
     let writer: Box<dyn Write + Send> =
-        if stdout().is_terminal() { Box::new(stdout()) } else { Box::new(stderr()) };
+        if use_stderr { Box::new(stderr()) } else { Box::new(stdout()) };
+
+    // Restore the terminal before the default panic handler prints, so the
+    // message is readable and the user's shell is not left in raw mode.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal_state(use_stderr);
+        default_hook(info);
+    }));
+
     enable_raw_mode()?;
+    let guard = TerminalGuard { use_stderr };
     let mut writer_mut = writer;
     execute!(writer_mut, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(writer_mut);
-    Terminal::new(backend).map_err(anyhow::Error::from)
-}
-
-fn restore_terminal<B: Backend + Write>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-    terminal.show_cursor()?;
-    Ok(())
+    Ok((Terminal::new(backend)?, guard))
 }
 
 #[cfg(test)]
@@ -660,5 +726,123 @@ mod tests {
         let selected = app_state.get_selected_entry();
         assert!(selected.is_some());
         assert_eq!(selected.unwrap().path, PathBuf::from("README.md"));
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn empty_app_state() -> AppState {
+        AppState {
+            master_entries: Vec::new(),
+            visible_entries: Vec::new(),
+            list_state: ListState::default(),
+            search_mode: SearchMode::None,
+            search_query: String::new(),
+            original_visible_entries: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_navigation_on_empty_list_does_not_panic() {
+        let mut app_state = empty_app_state();
+        app_state.next();
+        app_state.next();
+        assert_eq!(app_state.list_state.selected(), None);
+        app_state.previous();
+        app_state.previous();
+        assert_eq!(app_state.list_state.selected(), None);
+    }
+
+    #[test]
+    fn test_quit_key_outside_search_mode() {
+        let mut app_state = setup_test_app_state();
+        let action = handle_key(&mut app_state, key(KeyCode::Char('q')));
+        assert!(matches!(action, Some(PostExitAction::None)));
+    }
+
+    #[test]
+    fn test_typing_q_in_search_mode_does_not_quit() {
+        let mut app_state = setup_test_app_state();
+        assert!(handle_key(&mut app_state, key(KeyCode::Char('/'))).is_none());
+        assert!(app_state.in_search_mode());
+        let action = handle_key(&mut app_state, key(KeyCode::Char('q')));
+        assert!(action.is_none());
+        assert_eq!(app_state.search_query, "q");
+    }
+
+    #[test]
+    fn test_search_accepts_punctuation_characters() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['c', '+', '#', '('] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.search_query, "c+#(");
+    }
+
+    #[test]
+    fn test_ctrl_s_in_search_mode_prints_path() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        let ctrl_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        let action = handle_key(&mut app_state, ctrl_s);
+        assert!(matches!(action, Some(PostExitAction::PrintPath(_))));
+        // The modified 's' must not have been typed into the query.
+        assert_eq!(app_state.search_query, "");
+    }
+
+    #[test]
+    fn test_navigating_empty_search_results_does_not_panic() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['z', 'z', 'z'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert!(app_state.visible_entries.is_empty());
+        assert!(handle_key(&mut app_state, key(KeyCode::Down)).is_none());
+        assert!(handle_key(&mut app_state, key(KeyCode::Down)).is_none());
+        assert!(handle_key(&mut app_state, key(KeyCode::Up)).is_none());
+        assert_eq!(app_state.list_state.selected(), None);
+        // Enter with nothing selected is a no-op, not a crash or an exit.
+        assert!(handle_key(&mut app_state, key(KeyCode::Enter)).is_none());
+    }
+
+    #[test]
+    fn test_enter_on_directory_during_search_exits_search_and_toggles() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['s', 'r', 'c'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert!(handle_key(&mut app_state, key(KeyCode::Enter)).is_none());
+        assert!(!app_state.in_search_mode());
+        // Full list restored with the directory expanded and still selected.
+        assert_eq!(app_state.visible_entries.len(), 3);
+        assert_eq!(app_state.visible_entries[1].path, PathBuf::from("src/main.rs"));
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_exit_search_restores_selection_by_path() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['r', 'e', 'a', 'd'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+        handle_key(&mut app_state, key(KeyCode::Esc));
+        assert!(!app_state.in_search_mode());
+        assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_esc_outside_search_mode_quits() {
+        let mut app_state = setup_test_app_state();
+        let action = handle_key(&mut app_state, key(KeyCode::Esc));
+        assert!(matches!(action, Some(PostExitAction::None)));
     }
 }
