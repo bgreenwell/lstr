@@ -195,6 +195,39 @@ impl AppState {
         self.list_state.selected().and_then(|i| self.visible_entries.get(i))
     }
 
+    /// Collapses the selected directory if it is expanded; otherwise
+    /// collapses the directory containing the selection. The collapsed
+    /// directory becomes the new selection.
+    fn close_encompassing_directory(&mut self) {
+        let Some(selected) = self.get_selected_entry() else {
+            return;
+        };
+        let selected_path = selected.path.clone();
+
+        let selected_is_expanded_dir = self
+            .master_entries
+            .iter()
+            .any(|e| e.path == selected_path && e.is_dir && e.is_expanded);
+        let target_path = if selected_is_expanded_dir {
+            selected_path
+        } else {
+            // Fall back to the parent, but only when it is part of the tree
+            // (top-level entries have no collapsible parent).
+            match selected_path.parent() {
+                Some(parent) if self.master_entries.iter().any(|e| e.path == parent) => {
+                    parent.to_path_buf()
+                }
+                _ => return,
+            }
+        };
+
+        if let Some(master_entry) = self.master_entries.iter_mut().find(|e| e.path == target_path) {
+            master_entry.is_expanded = false;
+        }
+        self.regenerate_visible_entries();
+        self.select_path(&target_path);
+    }
+
     fn toggle_selected_directory(&mut self) {
         if let Some(selected_index) = self.list_state.selected() {
             let Some(selected_path) =
@@ -393,7 +426,8 @@ fn handle_key(app_state: &mut AppState, key: KeyEvent) -> Option<PostExitAction>
         KeyCode::Char('/') => app_state.enter_search_mode(),
         KeyCode::Down | KeyCode::Char('j') => app_state.next(),
         KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
-        KeyCode::Enter => return handle_enter(app_state),
+        KeyCode::Left | KeyCode::Char('h') => app_state.close_encompassing_directory(),
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => return handle_enter(app_state),
         _ => {}
     }
     None
@@ -829,5 +863,47 @@ mod tests {
         let mut app_state = setup_test_app_state();
         let action = handle_key(&mut app_state, key(KeyCode::Esc));
         assert!(matches!(action, Some(PostExitAction::None)));
+    }
+
+    #[test]
+    fn test_h_collapses_selected_expanded_directory() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(0));
+        app_state.toggle_selected_directory(); // expand src
+        assert_eq!(app_state.visible_entries.len(), 3);
+        handle_key(&mut app_state, key(KeyCode::Char('h')));
+        // src is collapsed again and stays selected.
+        assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_h_on_file_collapses_and_selects_parent() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(0));
+        app_state.toggle_selected_directory(); // expand src
+        app_state.list_state.select(Some(1)); // src/main.rs
+        handle_key(&mut app_state, key(KeyCode::Left));
+        assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("src"));
+    }
+
+    #[test]
+    fn test_h_on_top_level_file_is_noop() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(1)); // README.md at top level
+        handle_key(&mut app_state, key(KeyCode::Char('h')));
+        assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_l_and_right_expand_selected_directory() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(0));
+        handle_key(&mut app_state, key(KeyCode::Char('l')));
+        assert_eq!(app_state.visible_entries.len(), 3);
+        handle_key(&mut app_state, key(KeyCode::Right));
+        assert_eq!(app_state.visible_entries.len(), 2);
     }
 }
