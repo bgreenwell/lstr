@@ -529,7 +529,7 @@ fn scan_directory(
     args: &InteractiveArgs,
 ) -> anyhow::Result<Vec<FileEntry>> {
     let mut builder = WalkBuilder::new(path);
-    builder.hidden(!args.all).git_ignore(args.gitignore);
+    utils::configure_ignore_filters(&mut builder, args.all, args.gitignore);
 
     // Collect all DirEntry objects first, filtering out the root path
     let mut dir_entries: Vec<_> =

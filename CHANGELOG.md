@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed ignore files (`.ignore`, global gitignore, `.git/info/exclude`) filtering output even without the `-g` flag; all standard ignore filters are now tied to `-g` in both classic and interactive modes
 - Fixed the interactive TUI quitting when typing `q` (or other command keys) into a search query
 - Fixed a crash when navigating an empty directory or empty search results in interactive mode
 - Fixed the terminal being left in raw mode on the alternate screen when the TUI exited with an error or panic
