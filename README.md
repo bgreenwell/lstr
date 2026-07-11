@@ -87,6 +87,9 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `--icons`              | Display file-specific icons; requires a [Nerd Font](https://www.nerdfonts.com/). |
 | `--hyperlinks`         | Render file paths as clickable hyperlinks (classic mode only)               |
 | `-L`, `--level <LEVEL>`| Maximum depth to descend.                                                   |
+| `--file-depth <LEVEL>` | Hide individual files below this depth, summarized as `[+N files]` (classic mode only). |
+| `--max-items <N>`      | Show at most N entries per directory, summarized as `[+N more]` (classic mode only). |
+| `--output <FORMAT>`    | Output format: `text` (default) or `json` (classic mode only).              |
 | `-p`, `--permissions`  | Display file permissions (Unix-like systems only).                          |
 | `-s`, `--size`         | Display the size of files.                                                  |
 | `--sort <TYPE>`        | Sort entries by the specified criteria (`name`, `size`, `modified`, `extension`). |
@@ -96,6 +99,7 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `-r`, `--reverse`      | Reverse the sort order.                                                     |
 | `--dotfiles-first`     | Sort dotfiles and dotfolders first (dotfolders → folders → dotfiles → files). |
 | `--expand-level <LEVEL>`| **Interactive mode only:** Initial depth to expand the interactive tree.   |
+| `--editor <COMMAND>`   | **Interactive mode only:** Command used to open files, overriding `$VISUAL`/`$EDITOR`. |
 
 -----
 

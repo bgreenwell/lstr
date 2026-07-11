@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `--output json` for machine-readable classic-mode output, including sizes, permissions, and git status when the matching flags are set (progress toward [#7](https://github.com/bgreenwell/lstr/issues/7))
 - Added mouse support in interactive mode: scroll wheel moves the selection, click selects, and clicking the selected entry opens/toggles it ([Closes #28](https://github.com/bgreenwell/lstr/issues/28))
 - Added `--file-depth <LEVEL>` to hide individual files below a depth, summarized per directory as `[+N files]` — useful for high-level project overviews ([Closes #9](https://github.com/bgreenwell/lstr/issues/9))
 - Added `--max-items <N>` to cap entries shown per directory, summarizing the rest as `[+N more]` ([Closes #8](https://github.com/bgreenwell/lstr/issues/8))

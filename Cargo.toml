@@ -21,6 +21,7 @@ lscolors = "0.9"
 url = "2.5.2"
 ratatui = "0.27.0"
 natord = "1.0"
+serde_json = "1.0"
 
 # Dependencies for testing the command-line interface
 [dev-dependencies]

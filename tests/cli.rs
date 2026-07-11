@@ -665,3 +665,32 @@ fn test_max_items_limit() -> Result<(), Box<dyn std::error::Error>> {
     assert!(stdout.contains("4 files"), "{stdout}");
     Ok(())
 }
+
+#[test]
+fn test_json_output() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("sub"))?;
+    fs::write(temp_dir.path().join("sub/inner.txt"), "hello")?;
+    fs::write(temp_dir.path().join("we\"ird name.txt"), "x")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--output").arg("json").arg("-s").arg(temp_dir.path());
+    let output = cmd.output()?;
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+
+    assert_eq!(json["type"], "directory");
+    let contents = json["contents"].as_array().expect("root contents");
+    let sub = contents.iter().find(|e| e["name"] == "sub").expect("sub dir present");
+    assert_eq!(sub["type"], "directory");
+    let inner = &sub["contents"].as_array().expect("sub contents")[0];
+    assert_eq!(inner["name"], "inner.txt");
+    assert_eq!(inner["type"], "file");
+    assert_eq!(inner["size"], 5);
+    // Quote in the filename must be escaped correctly (parse already proves
+    // it; also check the value round-trips).
+    assert!(contents.iter().any(|e| e["name"] == "we\"ird name.txt"));
+    assert_eq!(json["report"]["directories"], 1);
+    assert_eq!(json["report"]["files"], 2);
+    Ok(())
+}
