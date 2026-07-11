@@ -12,9 +12,7 @@ use ignore::WalkBuilder;
 use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
 use ratatui::crossterm::{
     cursor,
-    event::{
-        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
-    },
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -335,10 +333,10 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
                     "vim".to_string()
                 }
             });
-            Command::new(editor).arg(path).status()?;
+            Command::new(editor).arg(utils::display_path(&path)).status()?;
         }
         PostExitAction::PrintPath(path) => {
-            println!("{}", path.display());
+            println!("{}", utils::display_path(&path).display());
         }
         PostExitAction::None => {}
     }

@@ -18,6 +18,45 @@ pub fn configure_ignore_filters(builder: &mut ignore::WalkBuilder, all: bool, gi
         .git_exclude(gitignore);
 }
 
+/// Returns a copy of `path` suitable for display, converting Windows
+/// verbatim paths (`\\?\C:\...` and `\\?\UNC\server\share\...`) produced by
+/// `fs::canonicalize` back to their conventional form. On other platforms
+/// the path is returned unchanged.
+pub fn display_path(path: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsString;
+        use std::path::{Component, Prefix};
+
+        let mut components = path.components();
+        let Some(Component::Prefix(prefix)) = components.next() else {
+            return path.to_path_buf();
+        };
+        let root = match prefix.kind() {
+            Prefix::VerbatimDisk(disk) => std::path::PathBuf::from(format!(r"{}:\", disk as char)),
+            Prefix::VerbatimUNC(server, share) => {
+                let mut s = OsString::from(r"\\");
+                s.push(server);
+                s.push(r"\");
+                s.push(share);
+                std::path::PathBuf::from(s)
+            }
+            _ => return path.to_path_buf(),
+        };
+        let mut result = root;
+        for component in components {
+            if component != Component::RootDir {
+                result.push(component.as_os_str());
+            }
+        }
+        result
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 /// Formats a size in bytes into a human-readable string using binary prefixes (KiB, MiB).
 pub fn format_size(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
@@ -124,6 +163,30 @@ mod tests {
         // -rwx------
         let mode_user_only = 0o700;
         assert_eq!(format_permissions(mode_user_only), "rwx------");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_display_path_strips_verbatim_prefix() {
+        use std::path::Path;
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\Users\test\file.txt")),
+            Path::new(r"C:\Users\test\file.txt")
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\dir")),
+            Path::new(r"\\server\share\dir")
+        );
+        // Conventional and relative paths pass through unchanged.
+        assert_eq!(display_path(Path::new(r"C:\normal\path")), Path::new(r"C:\normal\path"));
+        assert_eq!(display_path(Path::new(r"relative\path")), Path::new(r"relative\path"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_display_path_is_identity_on_non_windows() {
+        use std::path::Path;
+        assert_eq!(display_path(Path::new("/usr/local/bin")), Path::new("/usr/local/bin"));
     }
 
     #[test]
