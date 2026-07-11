@@ -101,7 +101,7 @@ Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.
 | :------ | :------------------------------------------------------------------------------------------------------------------------------------------ |
 | `↑` / `k` | Move selection up. |
 | `↓` / `j` | Move selection down. |
-| `Enter` | **Context-aware action:**\<br\>- If on a file: Open it in the default editor (`$EDITOR`).\<br\>- If on a directory: Toggle expand/collapse. |
+| `Enter` | **Context-aware action:**<br>- If on a file: Open it in the default editor (`$EDITOR`).<br>- If on a directory: Toggle expand/collapse. |
 | `q` / `Esc` | Quit the application normally. |
 | `Ctrl`+`s` | **Shell integration:** Quits and prints the selected path to stdout. |
 
