@@ -103,7 +103,7 @@ Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.
 | `↓` / `j` | Move selection down. |
 | `←` / `h` | Collapse the selected directory, or jump to and collapse its parent. |
 | `→` / `l` | Same as `Enter`. |
-| `Enter` | **Context-aware action:**<br>- If on a file: Open it in the default editor (`$EDITOR`).<br>- If on a directory: Toggle expand/collapse. |
+| `Enter` | **Context-aware action:**<br>- If on a file: Open it in the configured editor (`--editor`, `$VISUAL`, or `$EDITOR`), then return to the tree.<br>- If on a directory: Toggle expand/collapse. |
 | `/` | Search: filter entries by name as you type. `Esc` exits search. |
 | `q` / `Esc` | Quit the application normally. |
 | `Ctrl`+`s` | **Shell integration:** Quits and prints the selected path to stdout. |

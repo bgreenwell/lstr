@@ -139,6 +139,40 @@ impl AppState {
         Ok(app_state)
     }
 
+    /// Rescans the directory (picking up file and git-status changes, e.g.
+    /// after an editor session) while preserving which directories are
+    /// expanded and which entry is selected. Any active search is cleared.
+    fn refresh(&mut self, args: &InteractiveArgs, root_path: &Path) -> anyhow::Result<()> {
+        let expanded: std::collections::HashSet<PathBuf> = self
+            .master_entries
+            .iter()
+            .filter(|e| e.is_dir && e.is_expanded)
+            .map(|e| e.path.clone())
+            .collect();
+        let selected_path = self.get_selected_entry().map(|e| e.path.clone());
+
+        let git_repo_status =
+            if args.common.git_status { git::load_status(root_path)? } else { None };
+        let status_info = git_repo_status.as_ref().map(|s| (&s.cache, &s.root));
+        self.master_entries = scan_directory(root_path, status_info, args)?;
+        for entry in &mut self.master_entries {
+            if entry.is_dir && expanded.contains(&entry.path) {
+                entry.is_expanded = true;
+            }
+        }
+
+        self.search_mode = SearchMode::None;
+        self.search_query.clear();
+        self.original_visible_entries.clear();
+        self.regenerate_visible_entries();
+
+        let selection = selected_path
+            .and_then(|path| self.visible_entries.iter().position(|e| e.path == path))
+            .or(if self.visible_entries.is_empty() { None } else { Some(0) });
+        self.list_state.select(selection);
+        Ok(())
+    }
+
     fn regenerate_visible_entries(&mut self) {
         self.visible_entries.clear();
         let mut parent_expanded_stack: Vec<bool> = Vec::new();
@@ -352,28 +386,52 @@ pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     let root_path = fs::canonicalize(&args.common.path)?;
 
     let mut app_state = AppState::new(args, &root_path)?;
-    let (mut terminal, guard) = setup_terminal()?;
-    let run_result = run_app(&mut terminal, &mut app_state, args, ls_colors);
-    drop(guard);
-    let post_exit_action = run_result?;
 
-    match post_exit_action {
-        PostExitAction::OpenFile(path) => {
-            let editor = env::var("EDITOR").unwrap_or_else(|_| {
-                if cfg!(windows) {
-                    "notepad".to_string()
-                } else {
-                    "vim".to_string()
-                }
-            });
-            Command::new(editor).arg(utils::display_path(&path)).status()?;
+    // Opening a file suspends the TUI, runs the editor, then resumes with
+    // the tree state (expansion, selection) preserved.
+    loop {
+        let (mut terminal, guard) = setup_terminal()?;
+        let run_result = run_app(&mut terminal, &mut app_state, args, ls_colors);
+        drop(guard);
+
+        match run_result? {
+            PostExitAction::OpenFile(path) => {
+                open_file_in_editor(args, &path)?;
+                app_state.refresh(args, &root_path)?;
+            }
+            PostExitAction::PrintPath(path) => {
+                println!("{}", utils::display_path(&path).display());
+                break;
+            }
+            PostExitAction::None => break,
         }
-        PostExitAction::PrintPath(path) => {
-            println!("{}", utils::display_path(&path).display());
-        }
-        PostExitAction::None => {}
     }
 
+    Ok(())
+}
+
+/// Opens `path` with the configured editor: `--editor`, then `$VISUAL`,
+/// then `$EDITOR`, then a platform default. The command is split on
+/// whitespace and the file path appended as the last argument.
+fn open_file_in_editor(args: &InteractiveArgs, path: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+
+    let command_line = args
+        .editor
+        .clone()
+        .or_else(|| env::var("VISUAL").ok().filter(|v| !v.trim().is_empty()))
+        .or_else(|| env::var("EDITOR").ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| if cfg!(windows) { "notepad".to_string() } else { "vim".to_string() });
+
+    let mut parts = command_line.split_whitespace();
+    let Some(program) = parts.next() else {
+        anyhow::bail!("editor command is empty");
+    };
+    Command::new(program)
+        .args(parts)
+        .arg(utils::display_path(path))
+        .status()
+        .with_context(|| format!("failed to launch editor '{program}'"))?;
     Ok(())
 }
 
@@ -655,11 +713,16 @@ fn setup_terminal() -> anyhow::Result<(Terminal<TerminalWriter>, TerminalGuard)>
 
     // Restore the terminal before the default panic handler prints, so the
     // message is readable and the user's shell is not left in raw mode.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        restore_terminal_state(use_stderr);
-        default_hook(info);
-    }));
+    // Installed once: the TUI is suspended and resumed around editor
+    // sessions, and hooks must not chain on every resume.
+    static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+    PANIC_HOOK.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal_state(use_stderr);
+            default_hook(info);
+        }));
+    });
 
     enable_raw_mode()?;
     let guard = TerminalGuard { use_stderr };
@@ -895,6 +958,29 @@ mod tests {
         handle_key(&mut app_state, key(KeyCode::Char('h')));
         assert_eq!(app_state.visible_entries.len(), 2);
         assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_refresh_preserves_expansion_and_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        fs::write(temp.path().join("sub/inner.txt"), "x").unwrap();
+        fs::write(temp.path().join("top.txt"), "x").unwrap();
+        let args = InteractiveArgs::default();
+        let root = temp.path().canonicalize().unwrap();
+
+        let mut state = AppState::new(&args, &root).unwrap();
+        state.list_state.select(Some(0)); // "sub" sorts before "top.txt"
+        state.toggle_selected_directory();
+        assert_eq!(state.visible_entries.len(), 3);
+
+        // A file created while the TUI was suspended shows up after refresh,
+        // with expansion and selection intact.
+        fs::write(temp.path().join("sub/new.txt"), "x").unwrap();
+        state.refresh(&args, &root).unwrap();
+        assert_eq!(state.visible_entries.len(), 4);
+        assert!(state.visible_entries.iter().any(|e| e.path.ends_with("new.txt")));
+        assert_eq!(state.get_selected_entry().unwrap().path, root.join("sub"));
     }
 
     #[test]
