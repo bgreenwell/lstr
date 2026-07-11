@@ -589,3 +589,39 @@ fn test_hyperlinks_follow_colorization() -> Result<(), Box<dyn std::error::Error
     cmd.assert().success().stdout(predicate::str::contains("\x1b]8"));
     Ok(())
 }
+
+#[test]
+fn test_git_status_propagates_to_directories() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let temp_path = temp_dir.path();
+    Command::new("git").arg("init").current_dir(temp_path).output()?;
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(temp_path)
+        .output()?;
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(temp_path)
+        .output()?;
+
+    fs::create_dir(temp_path.join("subdir"))?;
+    fs::write(temp_path.join("subdir/inner.txt"), "one")?;
+    fs::write(temp_path.join("clean.txt"), "clean")?;
+    Command::new("git").args(["add", "."]).current_dir(temp_path).output()?;
+    Command::new("git").args(["commit", "-m", "init"]).current_dir(temp_path).output()?;
+    fs::write(temp_path.join("subdir/inner.txt"), "two")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-G").arg(temp_path);
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let dir_line = stdout.lines().find(|l| l.contains("subdir")).expect("subdir should be listed");
+    assert!(
+        dir_line.starts_with('M'),
+        "directory containing a modified file should show M: {dir_line}"
+    );
+    let clean_line =
+        stdout.lines().find(|l| l.contains("clean.txt")).expect("clean.txt should be listed");
+    assert!(clean_line.starts_with("  "), "clean file should have no marker: {clean_line}");
+    Ok(())
+}
