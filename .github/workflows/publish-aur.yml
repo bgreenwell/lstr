@@ -1,8 +1,9 @@
 name: Publish to AUR
 
+# Manual-only for now: the AUR lstr-bin package is community-maintained
+# (by Dominiquini), so this workflow cannot push until co-maintainer
+# access is arranged (see issue #15). Re-add the tag trigger then.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
