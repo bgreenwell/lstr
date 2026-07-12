@@ -18,9 +18,9 @@ Use this checklist when preparing a new release of lstr. You can also create a G
 
 ## Create Release
 
-- [ ] Commit version bump: `git commit -m "chore: release X.Y.Z"`
-- [ ] Push to main: `git push`
-- [ ] Create version tag: `git tag vX.Y.Z`
+- [ ] Commit version bump on a release branch off `devel`: `git commit -m "chore: release X.Y.Z"`, PR to `devel`, merge after CI
+- [ ] Merge `devel` into `main` (PR or fast-forward) and wait for CI
+- [ ] Create version tag on `main`: `git tag vX.Y.Z`
 - [ ] Push tag: `git push origin vX.Y.Z`
 - [ ] Wait for GitHub Actions workflows to complete (~10-15 minutes)
 
