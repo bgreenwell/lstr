@@ -20,7 +20,7 @@ colored = "2.1.0"
 clap = { version = "4.5.7", features = ["derive"] }
 git2 = { version = "0.20.2", default-features = false }
 ignore = "0.4.22"
-lscolors = "0.9"
+lscolors = "0.21"
 url = "2.5.2"
 ratatui = "0.27.0"
 natord = "1.0"
