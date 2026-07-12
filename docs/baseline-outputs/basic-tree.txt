@@ -1,0 +1,104 @@
+examples/sample-directory
+├── .env
+├── .gitignore
+├── Cargo.lock
+├── CHANGELOG.md
+├── LICENSE
+├── README.md
+├── assets
+│   ├── data
+│   ├── fonts
+│   └── images
+├── build
+│   ├── debug
+│   └── release
+├── docs
+│   ├── api.md
+│   └── changelog.txt
+├── node_modules
+│   └── package
+├── package.json
+├── src
+│   ├── lib.rs
+│   ├── main.rs
+│   ├── tests
+│   └── utils
+├── target
+│   ├── .rustc_info.json
+│   ├── CACHEDIR.TAG
+│   └── debug
+│       ├── .fingerprint
+│       │   ├── anstream-c9fa78edf8622f94
+│       │   ├── anstyle-21110f1318e2e27f
+│       │   ├── anstyle-parse-48540348b0ee189b
+│       │   ├── anstyle-query-09167e36def4e627
+│       │   ├── autocfg-9e4953921da0651d
+│       │   ├── bytes-02008f075e8eeac1
+│       │   ├── cfg-if-a3cf955d8a8f1781
+│       │   ├── clap-1d39a876082382a4
+│       │   ├── clap_builder-b6ca34456d6f4ca3
+│       │   ├── clap_derive-7cb7fe9c84b8ed5a
+│       │   ├── clap_lex-d18241e0d06f0627
+│       │   ├── colorchoice-20b6ffb774aa488a
+│       │   ├── heck-4195e4eb87131b05
+│       │   ├── is_terminal_polyfill-b91d85210a9e170f
+│       │   ├── libc-1c9920feb9c4f44d
+│       │   ├── libc-7ff99ef666b5e71e
+│       │   ├── libc-d0767c544b748c84
+│       │   ├── lock_api-27ab2c7caae047e6
+│       │   ├── lock_api-9501beffd7f4ddf5
+│       │   ├── lock_api-d1c760c34b200a75
+│       │   ├── mio-e21cc494d6f0fb74
+│       │   ├── parking_lot-d25fd44272b4b4c0
+│       │   ├── parking_lot_core-3cc721cdd7dac16f
+│       │   ├── parking_lot_core-af496622b3bee22e
+│       │   ├── parking_lot_core-b09f3cd8c06e7554
+│       │   ├── pin-project-lite-b3644ee9bd935317
+│       │   ├── proc-macro2-05e6b84aef4ea00d
+│       │   ├── proc-macro2-68a064ffd5fc9a18
+│       │   ├── proc-macro2-d00a9616764f2f22
+│       │   ├── quote-c880279cedffc32b
+│       │   ├── sample-app-326855621a740135
+│       │   ├── sample-app-9e3bad57f977cd97
+│       │   ├── scopeguard-3e76f4ef5a14b29e
+│       │   ├── serde-204b2dafce76c502
+│       │   ├── serde-8460b32a20f3cbb0
+│       │   ├── serde-f42663a9a42b43b0
+│       │   ├── serde_derive-74d1211746ba7b63
+│       │   ├── signal-hook-registry-a86ec6414823aaa1
+│       │   ├── smallvec-3fa9328cfdac6c01
+│       │   ├── socket2-0b043931d30aa058
+│       │   ├── strsim-f0cb1d28af79f464
+│       │   ├── syn-518c78f31bf5a549
+│       │   ├── tokio-715c02567dc6e722
+│       │   ├── tokio-macros-a324a9221684a0a3
+│       │   ├── unicode-ident-e3183169fa567f3e
+│       │   └── utf8parse-7bcea02f7c71fce0
+│       ├── build
+│       │   ├── libc-1c9920feb9c4f44d
+│       │   │   └── out
+│       │   ├── libc-d0767c544b748c84
+│       │   ├── lock_api-27ab2c7caae047e6
+│       │   ├── lock_api-9501beffd7f4ddf5
+│       │   │   └── out
+│       │   ├── parking_lot_core-af496622b3bee22e
+│       │   ├── parking_lot_core-b09f3cd8c06e7554
+│       │   │   └── out
+│       │   ├── proc-macro2-05e6b84aef4ea00d
+│       │   │   └── out
+│       │   ├── proc-macro2-68a064ffd5fc9a18
+│       │   ├── serde-8460b32a20f3cbb0
+│       │   └── serde-f42663a9a42b43b0
+│       │       └── out
+│       ├── deps
+│       ├── examples
+│       └── incremental
+│           ├── sample_app-38tmuhkojkk3e
+│           │   └── s-hav3653tq2-19f69vs-working
+│           └── sample_app-3fmd3auf8vuun
+│               └── s-hav35oxwbk-1h5ymq9-emzd7dgrrm05h3uujbq38eezl
+└── temp
+    ├── app.log
+    └── cache.tmp
+
+90 directories, 17 files

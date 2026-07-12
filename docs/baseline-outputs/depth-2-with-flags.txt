@@ -1,0 +1,31 @@
+  drwxr-xr-x examples/sample-directory
+  drwxr-xr-x ├── assets
+  drwxr-xr-x │   ├── data
+  drwxr-xr-x │   ├── fonts
+  drwxr-xr-x │   └── images
+  drwxr-xr-x ├── build
+  drwxr-xr-x │   ├── debug
+  drwxr-xr-x │   └── release
+  -rw-r--r-- ├── Cargo.lock
+  -rw-r--r-- ├── CHANGELOG.md
+  drwxr-xr-x ├── docs
+  -rw-r--r-- │   ├── api.md
+  -rw-r--r-- │   └── changelog.txt
+  -rw-r--r-- ├── LICENSE
+  drwxr-xr-x ├── node_modules
+  drwxr-xr-x │   └── package
+  -rw-r--r-- ├── package.json
+  -rw-r--r-- ├── README.md
+  drwxr-xr-x ├── src
+  -rw-r--r-- │   ├── lib.rs
+  -rw-r--r-- │   ├── main.rs
+  drwxr-xr-x │   ├── tests
+  drwxr-xr-x │   └── utils
+  drwxr-xr-x ├── target
+  -rw-r--r-- │   ├── CACHEDIR.TAG
+  drwxr-xr-x │   └── debug
+  drwxr-xr-x └── temp
+  -rw-r--r--     ├── app.log
+  -rw-r--r--     └── cache.tmp
+
+16 directories, 12 files
