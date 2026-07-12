@@ -84,7 +84,7 @@ pub fn load_status(start_path: &Path) -> anyhow::Result<Option<GitRepoStatus>> {
             continue;
         };
 
-        if let Some(path_str) = entry.path() {
+        if let Ok(path_str) = entry.path() {
             // Use the relative path directly as the key.
             cache.insert(PathBuf::from(path_str), status);
         }
