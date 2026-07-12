@@ -26,39 +26,43 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         crate::app::ColorChoice::Auto => {}
     }
 
-    // Format root directory with same alignment as tree entries
-    let root_metadata = if args.common.size || args.common.permissions {
-        fs::metadata(&args.common.path).ok()
-    } else {
-        None
-    };
+    let text_mode = args.output == crate::app::OutputFormat::Text;
 
-    let root_permissions_str = if args.common.permissions {
-        let perms = root_metadata
-            .as_ref()
-            .map(utils::permission_string)
-            .unwrap_or_else(|| "----------".to_string());
-        format!("{perms} ")
-    } else {
-        String::new()
-    };
+    if text_mode {
+        // Format root directory with same alignment as tree entries
+        let root_metadata = if args.common.size || args.common.permissions {
+            fs::metadata(&args.common.path).ok()
+        } else {
+            None
+        };
 
-    let root_git_status_str = if args.common.git_status {
-        "  ".to_string() // Empty git status column for consistent spacing
-    } else {
-        String::new()
-    };
+        let root_permissions_str = if args.common.permissions {
+            let perms = root_metadata
+                .as_ref()
+                .map(utils::permission_string)
+                .unwrap_or_else(|| "----------".to_string());
+            format!("{perms} ")
+        } else {
+            String::new()
+        };
 
-    if writeln!(
-        io::stdout(),
-        "{}{}{}",
-        root_git_status_str,
-        root_permissions_str,
-        args.common.path.display().to_string().blue().bold()
-    )
-    .is_err()
-    {
-        return Ok(());
+        let root_git_status_str = if args.common.git_status {
+            "  ".to_string() // Empty git status column for consistent spacing
+        } else {
+            String::new()
+        };
+
+        if writeln!(
+            io::stdout(),
+            "{}{}{}",
+            root_git_status_str,
+            root_permissions_str,
+            args.common.path.display().to_string().blue().bold()
+        )
+        .is_err()
+        {
+            return Ok(());
+        }
     }
 
     let git_repo_status =
@@ -120,6 +124,13 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     }
 
     let nodes = apply_display_limits(entries, args.file_depth, args.max_items);
+
+    if !text_mode {
+        let json =
+            render_json(args, &nodes, dir_count, file_count, status_cache, root_in_repo.as_ref());
+        let _ = writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&json)?);
+        return Ok(());
+    }
 
     // Build tree structure information
     let depths: Vec<usize> = nodes.iter().map(TreeNode::depth).collect();
@@ -285,6 +296,112 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     _ = writeln!(io::stdout(), "{summary}");
 
     Ok(())
+}
+
+/// Renders the node list as a nested JSON document (loosely modeled on
+/// `tree -J`): the root object has `path`, `type`, `contents`, and a
+/// `report` with the directory/file totals. Optional per-entry fields
+/// (`size`, `permissions`, `git_status`) appear when the matching flags
+/// are set; summary markers from the display limits become
+/// `{"type": "summary", ...}` objects.
+fn render_json(
+    args: &ViewArgs,
+    nodes: &[TreeNode],
+    dir_count: usize,
+    file_count: usize,
+    status_cache: Option<&git::StatusCache>,
+    root_in_repo: Option<&std::path::PathBuf>,
+) -> serde_json::Value {
+    use serde_json::{json, Map, Value};
+
+    fn build_level(
+        nodes: &[TreeNode],
+        index: &mut usize,
+        depth: usize,
+        args: &ViewArgs,
+        status_cache: Option<&git::StatusCache>,
+        root_in_repo: Option<&std::path::PathBuf>,
+    ) -> Vec<Value> {
+        let mut out = Vec::new();
+        while *index < nodes.len() && nodes[*index].depth() == depth {
+            match &nodes[*index] {
+                TreeNode::Summary { hidden_files, hidden_items, .. } => {
+                    *index += 1;
+                    let mut object = Map::new();
+                    object.insert("type".into(), "summary".into());
+                    if *hidden_files > 0 {
+                        object.insert("hidden_files".into(), (*hidden_files).into());
+                    }
+                    if *hidden_items > 0 {
+                        object.insert("hidden_items".into(), (*hidden_items).into());
+                    }
+                    out.push(Value::Object(object));
+                }
+                TreeNode::Entry(entry) => {
+                    *index += 1;
+                    let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                    let type_str = if is_dir {
+                        "directory"
+                    } else if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
+                        "symlink"
+                    } else {
+                        "file"
+                    };
+
+                    let mut object = Map::new();
+                    object.insert(
+                        "name".into(),
+                        entry.file_name().to_string_lossy().into_owned().into(),
+                    );
+                    object.insert("type".into(), type_str.into());
+
+                    let metadata = if args.common.size || args.common.permissions {
+                        entry.metadata().ok()
+                    } else {
+                        None
+                    };
+                    if args.common.size && !is_dir {
+                        if let Some(md) = &metadata {
+                            object.insert("size".into(), md.len().into());
+                        }
+                    }
+                    if args.common.permissions {
+                        if let Some(md) = &metadata {
+                            object
+                                .insert("permissions".into(), utils::permission_string(md).into());
+                        }
+                    }
+                    if let (Some(cache), Some(base)) = (status_cache, root_in_repo) {
+                        if let Some(status) = entry
+                            .path()
+                            .strip_prefix(&args.common.path)
+                            .ok()
+                            .and_then(|rel| cache.get(&base.join(rel)))
+                        {
+                            object
+                                .insert("git_status".into(), status.get_char().to_string().into());
+                        }
+                    }
+                    if is_dir {
+                        let children =
+                            build_level(nodes, index, depth + 1, args, status_cache, root_in_repo);
+                        object.insert("contents".into(), Value::Array(children));
+                    }
+                    out.push(Value::Object(object));
+                }
+            }
+        }
+        out
+    }
+
+    let mut index = 0;
+    let contents = build_level(nodes, &mut index, 1, args, status_cache, root_in_repo);
+    json!({
+        "path": args.common.path.display().to_string(),
+        "type": "directory",
+        "contents": contents,
+        "report": { "directories": dir_count, "files": file_count },
+    })
 }
 
 /// A renderable line in the tree: a real entry, or a per-directory summary

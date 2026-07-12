@@ -112,6 +112,26 @@ pub struct ViewArgs {
     /// Render file paths as clickable hyperlinks.
     #[arg(long)]
     pub hyperlinks: bool,
+    /// Output format for the tree.
+    #[arg(long, value_name = "FORMAT", default_value_t = OutputFormat::Text)]
+    pub output: OutputFormat,
+}
+
+/// Defines the available output formats for the classic view.
+#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// Human-readable tree (default)
+    #[default]
+    Text,
+    /// Machine-readable JSON
+    Json,
+}
+
+/// Implements the Display trait for OutputFormat to show possible values in help messages.
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value().expect("no values are skipped").get_name().fmt(f)
+    }
 }
 
 /// Arguments for the `interactive` command.
