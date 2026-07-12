@@ -16,7 +16,7 @@ exclude = ["examples/", "assets/", ".github/", "docs/", "scripts/"]
 
 [dependencies]
 anyhow = "1.0"
-colored = "2.1.0"
+colored = "3.1.1"
 clap = { version = "4.5.7", features = ["derive"] }
 git2 = { version = "0.20.2", default-features = false }
 ignore = "0.4.22"
