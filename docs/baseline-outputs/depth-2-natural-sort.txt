@@ -1,0 +1,31 @@
+examples/sample-directory
+├── CHANGELOG.md
+├── Cargo.lock
+├── LICENSE
+├── README.md
+├── assets
+│   ├── data
+│   ├── fonts
+│   └── images
+├── build
+│   ├── debug
+│   └── release
+├── docs
+│   ├── api.md
+│   └── changelog.txt
+├── node_modules
+│   └── package
+├── package.json
+├── src
+│   ├── lib.rs
+│   ├── main.rs
+│   ├── tests
+│   └── utils
+├── target
+│   ├── CACHEDIR.TAG
+│   └── debug
+└── temp
+    ├── app.log
+    └── cache.tmp
+
+16 directories, 12 files

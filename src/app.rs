@@ -62,12 +62,14 @@ pub struct CommonArgs {
     #[arg(long)]
     pub case_sensitive: bool,
     /// Use natural/version sorting (e.g., file1 < file10).
+    /// Takes precedence over --case-sensitive.
     #[arg(long)]
     pub natural_sort: bool,
     /// Reverse the sort order.
     #[arg(short = 'r', long)]
     pub reverse: bool,
-    /// Sort dotfiles and dotfolders first.
+    /// Sort dotfiles and dotfolders first (dotfolders, folders, dotfiles,
+    /// then files). Implies --dirs-first.
     #[arg(long)]
     pub dotfiles_first: bool,
 }

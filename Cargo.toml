@@ -10,6 +10,9 @@ homepage = "https://github.com/bgreenwell/lstr"
 repository = "https://github.com/bgreenwell/lstr" 
 keywords = ["ls", "tree", "filesystem", "command-line"]
 categories = ["command-line-utilities", "filesystem"]
+# Keep the crates.io package lean: test fixtures, demo assets, CI config,
+# and development docs/scripts are repo-only.
+exclude = ["examples/", "assets/", ".github/", "docs/", "scripts/"]
 
 [dependencies]
 anyhow = "1.0"

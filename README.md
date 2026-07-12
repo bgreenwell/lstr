@@ -17,16 +17,19 @@ A fast, minimalist directory tree viewer, written in Rust. Inspired by the comma
 
 ## Features
 
-  - **Classic and interactive modes:** Use `lstr` for a classic `tree`-like view, or launch `lstr interactive` for a fully interactive TUI.
+  - **Classic and interactive modes:** Use `lstr` for a classic `tree`-like view, or launch `lstr interactive` for a fully interactive TUI with keyboard and mouse navigation, filename search (`/`), and in-place file opening that returns to the tree when your editor exits.
   - **Theme-aware coloring:** Respects your system's `LS_COLORS` environment variable for fully customizable file and directory colors.
   - **Rich information display (optional):**
       - Display file-specific icons with `--icons` (requires a Nerd Font).
-      - Show file permissions with `-p`.
-      - Show file sizes with `-s`.
-      - **Git Integration:** Show file statuses (`Modified`, `New`, `Untracked`, etc.) directly in the tree with the `-G` flag.
+      - Show file permissions with `-p`, including symlink and setuid/setgid/sticky indicators.
+      - Show file sizes with `-s`, or cumulative directory sizes with `--du`.
+      - **Git integration:** Show file statuses (`M`, `A`, `?`, etc.) with `-G`; directories reflect the status of their contents.
+  - **Flexible sorting:** By name, size, modification time, or extension, with directories-first, natural/version, case-sensitive, and reverse variants.
   - **Smart filtering:**
       - Respects your `.gitignore` files with the `-g` flag.
       - Control recursion depth (`-L`) or show only directories (`-d`).
+      - Summarize deep or crowded directories with `--file-depth` and `--max-items`.
+  - **Scriptable:** JSON output (`--output json`), pipe-friendly text, and a `Ctrl+s` file-picker mode for shell integration.
 
 ## Installation
 
@@ -96,9 +99,9 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `--sort <TYPE>`        | Sort entries by the specified criteria (`name`, `size`, `modified`, `extension`). |
 | `--dirs-first`         | Sort directories before files.                                              |
 | `--case-sensitive`     | Use case-sensitive sorting.                                                 |
-| `--natural-sort`       | Use natural/version sorting (e.g., file1 < file10).                        |
+| `--natural-sort`       | Use natural/version sorting (e.g., file1 < file10). Takes precedence over `--case-sensitive`. |
 | `-r`, `--reverse`      | Reverse the sort order.                                                     |
-| `--dotfiles-first`     | Sort dotfiles and dotfolders first (dotfolders → folders → dotfiles → files). |
+| `--dotfiles-first`     | Sort dotfiles and dotfolders first (dotfolders → folders → dotfiles → files). Implies `--dirs-first`. |
 | `--expand-level <LEVEL>`| **Interactive mode only:** Initial depth to expand the interactive tree.   |
 | `--editor <COMMAND>`   | **Interactive mode only:** Command used to open files, overriding `$VISUAL`/`$EDITOR`. |
 
@@ -178,10 +181,10 @@ lstr --sort size --reverse
 lstr --sort extension --case-sensitive
 ```
 
-**10. Sort with dotfiles first and directories first**
+**10. Sort with dotfiles and dotfolders first**
 
 ```bash
-lstr --dotfiles-first --dirs-first -a
+lstr --dotfiles-first -a
 ```
 
 ## Piping and shell interaction
@@ -252,7 +255,7 @@ macOS does not set the `LS_COLORS` variable by default. To enable this feature, 
 
 ```bash
 brew install coreutils
-````
+```
 
 Then, add the following line to your shell's startup file (e.g., `~/.zshrc` or `~/.bash_profile`):
 
@@ -297,4 +300,4 @@ The philosophy and functionality of `lstr` are heavily inspired by the excellent
 
 ## License
 
-This project is licensed under the terms of the [MIT License](https://www.google.com/search?q=LICENSE).
+This project is licensed under the terms of the [MIT License](LICENSE).
