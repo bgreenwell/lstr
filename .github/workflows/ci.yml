@@ -5,9 +5,9 @@ name: Rust CI
 # It will trigger on any `push` to any branch, and on any `pull_request`.
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "devel" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "devel" ]
 
 # This defines the environment for the workflow. We set Cargo to use color output.
 env:
