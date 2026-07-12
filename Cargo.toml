@@ -1,6 +1,6 @@
 [package]
 name = "lstr"
-version = "0.2.1" 
+version = "0.3.0"
 authors = ["Brandon Greenwell <greenwell.brandon@gmail.com>"]
 edition = "2021"
 description = "A blazingly fast, minimalist directory tree viewer, written in Rust."
