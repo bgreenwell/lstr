@@ -697,3 +697,48 @@ fn test_json_output() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(json["report"]["files"], 2);
     Ok(())
 }
+
+#[test]
+fn test_du_cumulative_directory_sizes() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("sub"))?;
+    fs::write(temp_dir.path().join("sub/file1.txt"), vec![b'x'; 100])?;
+    fs::write(temp_dir.path().join("sub/file2.txt"), vec![b'x'; 50])?;
+    fs::write(temp_dir.path().join("top.txt"), vec![b'x'; 10])?;
+
+    // --du implies -s and shows cumulative sizes on directories.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--du").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let sub_line = stdout.lines().find(|l| l.contains("sub (")).expect("sub should show a size");
+    // Cumulative size is at least the 150 bytes of contents. The directory
+    // entry's own stat size is platform-dependent (can push into KiB on
+    // ext4), so parse the human-readable value with its unit.
+    let inside = sub_line.split('(').nth(1).expect("size after name");
+    let mut parts = inside.split_whitespace();
+    let number: f64 = parts.next().and_then(|s| s.parse().ok()).expect("numeric size");
+    let unit = parts.next().expect("unit").trim_end_matches(')');
+    let bytes = match unit {
+        "B" => number,
+        "KiB" => number * 1024.0,
+        other => panic!("unexpected unit {other} in {sub_line}"),
+    };
+    assert!(bytes >= 150.0, "cumulative size should include contents: {sub_line}");
+    assert!(stdout.contains("file1.txt (100 B)"), "{stdout}");
+    assert!(stdout.contains("used in 1 directories, 3 files"), "{stdout}");
+
+    // JSON output carries directory sizes too.
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--du").arg("--output").arg("json").arg(temp_dir.path());
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+    let sub = json["contents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "sub")
+        .expect("sub in json");
+    assert!(sub["size"].as_u64().expect("dir size present") >= 150);
+    assert!(json["report"]["total_size"].as_u64().expect("total present") >= 160);
+    Ok(())
+}

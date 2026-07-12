@@ -89,6 +89,7 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `-L`, `--level <LEVEL>`| Maximum depth to descend.                                                   |
 | `--file-depth <LEVEL>` | Hide individual files below this depth, summarized as `[+N files]` (classic mode only). |
 | `--max-items <N>`      | Show at most N entries per directory, summarized as `[+N more]` (classic mode only). |
+| `--du`                 | Show directories with the cumulative size of their contents, like `tree --du`; implies `-s` (classic mode only). |
 | `--output <FORMAT>`    | Output format: `text` (default) or `json` (classic mode only).              |
 | `-p`, `--permissions`  | Display file permissions (Unix-like systems only).                          |
 | `-s`, `--size`         | Display the size of files.                                                  |
