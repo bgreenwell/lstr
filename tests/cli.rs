@@ -671,7 +671,10 @@ fn test_json_output() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempdir()?;
     fs::create_dir(temp_dir.path().join("sub"))?;
     fs::write(temp_dir.path().join("sub/inner.txt"), "hello")?;
-    fs::write(temp_dir.path().join("we\"ird name.txt"), "x")?;
+    // Quotes are illegal in Windows filenames, so the JSON-escaping check
+    // runs on Unix only; Windows still checks the rest of the structure.
+    let weird_name = if cfg!(windows) { "weird name.txt" } else { "we\"ird name.txt" };
+    fs::write(temp_dir.path().join(weird_name), "x")?;
 
     let mut cmd = Command::cargo_bin("lstr")?;
     cmd.arg("--output").arg("json").arg("-s").arg(temp_dir.path());
@@ -689,7 +692,7 @@ fn test_json_output() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(inner["size"], 5);
     // Quote in the filename must be escaped correctly (parse already proves
     // it; also check the value round-trips).
-    assert!(contents.iter().any(|e| e["name"] == "we\"ird name.txt"));
+    assert!(contents.iter().any(|e| e["name"] == weird_name));
     assert_eq!(json["report"]["directories"], 1);
     assert_eq!(json["report"]["files"], 2);
     Ok(())
