@@ -14,9 +14,13 @@ cargo test test_name -- --nocapture     # single test
 ./scripts/test-dual-mode.sh             # classic + TUI consistency checks
 ```
 
-All three CI gates must pass before committing. Never develop on `main`:
-branch (`feature/...`, `fix/...`, `chore/...`), open a PR, merge after CI
-is green on Ubuntu, macOS, and Windows.
+All three CI gates must pass before committing.
+
+Branch model: `devel` is the default and integration branch; `main` tracks
+releases. Never commit directly to either — branch off `devel`
+(`feature/...`, `fix/...`, `chore/...`), open a PR to `devel`, and merge
+after CI is green on Ubuntu, macOS, and Windows. Releases merge `devel`
+into `main` and tag `vX.Y.Z` there (see `RELEASE_CHECKLIST.md`).
 
 ## Architecture
 
