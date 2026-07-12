@@ -1,0 +1,52 @@
+name: Publish to WinGet
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g., v0.2.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-winget:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-') || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Determine release version
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Install Komac
+        uses: cargo-bins/cargo-binstall@v1.20.1
+
+      - name: Install komac binary
+        run: cargo binstall komac -y
+
+      - name: Sync WinGet fork
+        run: gh repo sync bgreenwell/winget-pkgs
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+
+      - name: Publish to WinGet with Komac
+        run: |
+          komac update bgreenwell.lstr \
+            --version ${{ steps.get-version.outputs.version }} \
+            --urls "https://github.com/bgreenwell/lstr/releases/download/${{ steps.get-version.outputs.tag }}/lstr-x86_64-pc-windows-msvc.msi" \
+            --submit
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}

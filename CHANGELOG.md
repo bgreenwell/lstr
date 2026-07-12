@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Releases are now built with cargo-dist: shell/PowerShell installers, a Windows MSI, six prebuilt targets (x86_64/aarch64 for Linux, macOS, Windows), and automated publishing to Homebrew, Scoop, AUR (`lstr-bin`), and WinGet
 - Added `--du` to show directories with the cumulative size of their contents (like `tree --du`, implies `-s`); the summary line and JSON report include the total ([Closes #12](https://github.com/bgreenwell/lstr/issues/12))
 - Added `--output json` for machine-readable classic-mode output, including sizes, permissions, and git status when the matching flags are set (progress toward [#7](https://github.com/bgreenwell/lstr/issues/7))
 - Added mouse support in interactive mode: scroll wheel moves the selection, click selects, and clicking the selected entry opens/toggles it ([Closes #28](https://github.com/bgreenwell/lstr/issues/28))
