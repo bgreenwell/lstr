@@ -109,6 +109,10 @@ pub struct ViewArgs {
     /// rest as "[+N more]".
     #[arg(long, value_name = "N")]
     pub max_items: Option<usize>,
+    /// Show directories with the cumulative size of their contents,
+    /// like `tree --du` (implies -s).
+    #[arg(long)]
+    pub du: bool,
     /// Render file paths as clickable hyperlinks.
     #[arg(long)]
     pub hyperlinks: bool,

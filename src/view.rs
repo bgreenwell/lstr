@@ -123,11 +123,27 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         }
     }
 
+    // Cumulative sizes are computed over the full entry list, before any
+    // display limits, so a directory's size stays truthful even when its
+    // children are hidden.
+    let du_sizes = if args.du { Some(compute_cumulative_sizes(&entries)) } else { None };
+    let du_map = du_sizes.as_ref().map(|(map, _)| map);
+    let du_total = du_sizes.as_ref().map(|(_, total)| *total);
+    let size_enabled = args.common.size || args.du;
+
     let nodes = apply_display_limits(entries, args.file_depth, args.max_items);
 
     if !text_mode {
-        let json =
-            render_json(args, &nodes, dir_count, file_count, status_cache, root_in_repo.as_ref());
+        let json = render_json(
+            args,
+            &nodes,
+            dir_count,
+            file_count,
+            status_cache,
+            root_in_repo.as_ref(),
+            du_map,
+            du_total,
+        );
         let _ = writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&json)?);
         return Ok(());
     }
@@ -191,7 +207,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         };
 
         let metadata =
-            if args.common.size || args.common.permissions { entry.metadata().ok() } else { None };
+            if size_enabled || args.common.permissions { entry.metadata().ok() } else { None };
         let permissions_str = if args.common.permissions {
             let perms = metadata
                 .as_ref()
@@ -209,7 +225,13 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         } else {
             String::new()
         };
-        let size_str = if args.common.size && !is_dir {
+        let size_str = if size_enabled && is_dir {
+            // Directories only carry a size under --du (cumulative).
+            du_map
+                .and_then(|map| map.get(entry.path()))
+                .map(|size| format!(" ({})", utils::format_size(*size)))
+                .unwrap_or_default()
+        } else if size_enabled {
             metadata
                 .as_ref()
                 .map(|m| format!(" ({})", utils::format_size(m.len())))
@@ -292,10 +314,54 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         }
     }
 
-    let summary = format!("\n{dir_count} directories, {file_count} files");
+    let summary = match du_total {
+        Some(total) => format!(
+            "\n{} used in {dir_count} directories, {file_count} files",
+            utils::format_size(total)
+        ),
+        None => format!("\n{dir_count} directories, {file_count} files"),
+    };
     _ = writeln!(io::stdout(), "{summary}");
 
     Ok(())
+}
+
+/// Computes each entry's cumulative apparent size (its own stat size plus,
+/// for directories, everything beneath it), keyed by path — the same
+/// accounting as `tree --du`. Returns the map and the grand total of the
+/// top-level entries.
+///
+/// Entries must be in depth-first order: a forward pass records each
+/// entry's parent index, then a reverse pass rolls sizes up, so the whole
+/// computation is O(n) with one `stat` per entry.
+fn compute_cumulative_sizes(
+    entries: &[ignore::DirEntry],
+) -> (std::collections::HashMap<std::path::PathBuf, u64>, u64) {
+    let mut sizes: Vec<u64> =
+        entries.iter().map(|e| e.metadata().ok().map(|m| m.len()).unwrap_or(0)).collect();
+
+    let mut parent_index: Vec<Option<usize>> = vec![None; entries.len()];
+    let mut ancestors: Vec<usize> = Vec::new(); // ancestors[k] is at depth k + 1
+    for (index, entry) in entries.iter().enumerate() {
+        ancestors.truncate(entry.depth().saturating_sub(1));
+        parent_index[index] = ancestors.last().copied();
+        ancestors.push(index);
+    }
+
+    for index in (0..entries.len()).rev() {
+        if let Some(parent) = parent_index[index] {
+            sizes[parent] += sizes[index];
+        }
+    }
+
+    let total = entries
+        .iter()
+        .zip(&sizes)
+        .filter(|(entry, _)| entry.depth() == 1)
+        .map(|(_, size)| size)
+        .sum();
+    let map = entries.iter().zip(sizes).map(|(e, s)| (e.path().to_path_buf(), s)).collect();
+    (map, total)
 }
 
 /// Renders the node list as a nested JSON document (loosely modeled on
@@ -304,6 +370,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 /// (`size`, `permissions`, `git_status`) appear when the matching flags
 /// are set; summary markers from the display limits become
 /// `{"type": "summary", ...}` objects.
+#[allow(clippy::too_many_arguments)]
 fn render_json(
     args: &ViewArgs,
     nodes: &[TreeNode],
@@ -311,6 +378,8 @@ fn render_json(
     file_count: usize,
     status_cache: Option<&git::StatusCache>,
     root_in_repo: Option<&std::path::PathBuf>,
+    du_map: Option<&std::collections::HashMap<std::path::PathBuf, u64>>,
+    du_total: Option<u64>,
 ) -> serde_json::Value {
     use serde_json::{json, Map, Value};
 
@@ -321,6 +390,7 @@ fn render_json(
         args: &ViewArgs,
         status_cache: Option<&git::StatusCache>,
         root_in_repo: Option<&std::path::PathBuf>,
+        du_map: Option<&std::collections::HashMap<std::path::PathBuf, u64>>,
     ) -> Vec<Value> {
         let mut out = Vec::new();
         while *index < nodes.len() && nodes[*index].depth() == depth {
@@ -355,12 +425,18 @@ fn render_json(
                     );
                     object.insert("type".into(), type_str.into());
 
-                    let metadata = if args.common.size || args.common.permissions {
+                    let size_enabled = args.common.size || args.du;
+                    let metadata = if size_enabled || args.common.permissions {
                         entry.metadata().ok()
                     } else {
                         None
                     };
-                    if args.common.size && !is_dir {
+                    if size_enabled && is_dir {
+                        // Directories only carry a size under --du.
+                        if let Some(size) = du_map.and_then(|map| map.get(entry.path())) {
+                            object.insert("size".into(), (*size).into());
+                        }
+                    } else if size_enabled {
                         if let Some(md) = &metadata {
                             object.insert("size".into(), md.len().into());
                         }
@@ -383,8 +459,15 @@ fn render_json(
                         }
                     }
                     if is_dir {
-                        let children =
-                            build_level(nodes, index, depth + 1, args, status_cache, root_in_repo);
+                        let children = build_level(
+                            nodes,
+                            index,
+                            depth + 1,
+                            args,
+                            status_cache,
+                            root_in_repo,
+                            du_map,
+                        );
                         object.insert("contents".into(), Value::Array(children));
                     }
                     out.push(Value::Object(object));
@@ -395,12 +478,18 @@ fn render_json(
     }
 
     let mut index = 0;
-    let contents = build_level(nodes, &mut index, 1, args, status_cache, root_in_repo);
+    let contents = build_level(nodes, &mut index, 1, args, status_cache, root_in_repo, du_map);
+    let mut report = Map::new();
+    report.insert("directories".into(), dir_count.into());
+    report.insert("files".into(), file_count.into());
+    if let Some(total) = du_total {
+        report.insert("total_size".into(), total.into());
+    }
     json!({
         "path": args.common.path.display().to_string(),
         "type": "directory",
         "contents": contents,
-        "report": { "directories": dir_count, "files": file_count },
+        "report": report,
     })
 }
 

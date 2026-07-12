@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `--du` to show directories with the cumulative size of their contents (like `tree --du`, implies `-s`); the summary line and JSON report include the total ([Closes #12](https://github.com/bgreenwell/lstr/issues/12))
 - Added `--output json` for machine-readable classic-mode output, including sizes, permissions, and git status when the matching flags are set (progress toward [#7](https://github.com/bgreenwell/lstr/issues/7))
 - Added mouse support in interactive mode: scroll wheel moves the selection, click selects, and clicking the selected entry opens/toggles it ([Closes #28](https://github.com/bgreenwell/lstr/issues/28))
 - Added `--file-depth <LEVEL>` to hide individual files below a depth, summarized per directory as `[+N files]` — useful for high-level project overviews ([Closes #9](https://github.com/bgreenwell/lstr/issues/9))
