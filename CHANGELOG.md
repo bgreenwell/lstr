@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated major dependencies: ratatui 0.30, colored 3, lscolors 0.21, git2 0.21, clap 4.6
+- When `LS_COLORS` is set, only the suffixes it defines are colored (lscolors no longer merges built-in defaults into a custom `LS_COLORS`); behavior without `LS_COLORS` is unchanged
+- Declared a minimum supported Rust version of 1.88 (`rust-version` in Cargo.toml)
+
 ## [0.3.0] - 2026-07-12
 
 ### Added

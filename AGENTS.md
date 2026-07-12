@@ -29,6 +29,7 @@ is green on Ubuntu, macOS, and Windows.
 | `sort.rs`  | `sort_entries_hierarchically` (DFS-order preserving) built on decorate-sort-undecorate `SortKey`s. |
 | `git.rs`   | git2 status cache keyed by repo-relative path; file statuses propagate to ancestor directories (most severe wins). |
 | `utils.rs` | Shared helpers: `configure_ignore_filters`, `permission_string`, `format_size`, `display_path` (Windows verbatim paths). |
+| `color.rs` | All conversions between the lscolors, colored, and ratatui color models — never map colors inline elsewhere. |
 | `icons.rs` | Nerd Font icon mapping. |
 
 ## Invariants that break silently

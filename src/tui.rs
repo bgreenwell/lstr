@@ -4,12 +4,13 @@
 //! session, including state management, event handling, and rendering.
 
 use crate::app::InteractiveArgs;
+use crate::color;
 use crate::git::{self, StatusCache};
 use crate::icons;
 use crate::sort;
 use crate::utils;
 use ignore::WalkBuilder;
-use lscolors::{Color as LsColor, LsColors, Style as LsStyle};
+use lscolors::LsColors;
 use ratatui::crossterm::{
     cursor,
     event::{
@@ -20,7 +21,7 @@ use ratatui::crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -32,46 +33,6 @@ use std::fs;
 use std::io::{stderr, stdout, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-/// Converts an lscolors::Style to a ratatui::style::Style
-fn to_ratatui_style(ls_style: LsStyle) -> Style {
-    let mut style = Style::default();
-
-    if let Some(fg) = ls_style.foreground {
-        style = style.fg(match fg {
-            LsColor::Black => Color::Black,
-            LsColor::Red => Color::Red,
-            LsColor::Green => Color::Green,
-            LsColor::Yellow => Color::Yellow,
-            LsColor::Blue => Color::Blue,
-            LsColor::Magenta => Color::Magenta,
-            LsColor::Cyan => Color::Cyan,
-            LsColor::White => Color::White,
-            LsColor::BrightBlack => Color::Gray,
-            LsColor::BrightRed => Color::LightRed,
-            LsColor::BrightGreen => Color::LightGreen,
-            LsColor::BrightYellow => Color::LightYellow,
-            LsColor::BrightBlue => Color::LightBlue,
-            LsColor::BrightMagenta => Color::LightMagenta,
-            LsColor::BrightCyan => Color::LightCyan,
-            LsColor::BrightWhite => Color::White,
-            LsColor::Fixed(n) => Color::Indexed(n),
-            LsColor::RGB(r, g, b) => Color::Rgb(r, g, b),
-        });
-    }
-
-    if ls_style.font_style.bold {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    if ls_style.font_style.italic {
-        style = style.add_modifier(Modifier::ITALIC);
-    }
-    if ls_style.font_style.underline {
-        style = style.add_modifier(Modifier::UNDERLINED);
-    }
-
-    style
-}
 
 enum PostExitAction {
     None,
@@ -438,8 +399,8 @@ fn open_file_in_editor(args: &InteractiveArgs, path: &Path) -> anyhow::Result<()
     Ok(())
 }
 
-fn run_app<B: Backend + Write>(
-    terminal: &mut Terminal<B>,
+fn run_app(
+    terminal: &mut Terminal<TerminalWriter>,
     app_state: &mut AppState,
     args: &InteractiveArgs,
     ls_colors: &LsColors,
@@ -565,7 +526,7 @@ fn handle_enter(app_state: &mut AppState) -> Option<PostExitAction> {
 }
 
 fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors: &LsColors) {
-    let frame_width = f.size().width as usize;
+    let frame_width = f.area().width as usize;
     let items: Vec<ListItem> = app_state
         .visible_entries
         .iter()
@@ -610,12 +571,15 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
             spans.push(Span::raw(branch_str));
             if args.common.icons {
                 let (icon, color) = icons::get_icon_for_path(&entry.path, entry.is_dir);
-                spans.push(Span::styled(format!("{icon} "), Style::default().fg(map_color(color))));
+                spans.push(Span::styled(
+                    format!("{icon} "),
+                    Style::default().fg(color::colored_to_ratatui(color)),
+                ));
             }
 
             let name = entry.path.file_name().unwrap().to_string_lossy();
             let lscolors_style = ls_colors.style_for_path(&entry.path).cloned().unwrap_or_default();
-            let ratatui_style = to_ratatui_style(lscolors_style);
+            let ratatui_style = color::ls_to_ratatui_style(lscolors_style);
             let name_span = Span::styled(name.to_string(), ratatui_style);
             spans.push(name_span);
 
@@ -639,7 +603,7 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
             Constraint::Min(0),    // Main area (flexible)
             Constraint::Length(1), // Status line (1 row)
         ])
-        .split(f.size());
+        .split(f.area());
 
     // Render the file list in the main area
     let list = List::new(items)
@@ -709,28 +673,6 @@ fn scan_directory(
         });
     }
     Ok(entries)
-}
-
-fn map_color(c: colored::Color) -> Color {
-    match c {
-        colored::Color::Black => Color::Black,
-        colored::Color::Red => Color::Red,
-        colored::Color::Green => Color::Green,
-        colored::Color::Yellow => Color::Yellow,
-        colored::Color::Blue => Color::Blue,
-        colored::Color::Magenta => Color::Magenta,
-        colored::Color::Cyan => Color::Cyan,
-        colored::Color::White => Color::White,
-        colored::Color::BrightBlack => Color::Gray,
-        colored::Color::BrightRed => Color::LightRed,
-        colored::Color::BrightGreen => Color::LightGreen,
-        colored::Color::BrightYellow => Color::LightYellow,
-        colored::Color::BrightBlue => Color::LightBlue,
-        colored::Color::BrightMagenta => Color::LightMagenta,
-        colored::Color::BrightCyan => Color::LightCyan,
-        colored::Color::TrueColor { r, g, b } => Color::Rgb(r, g, b),
-        _ => Color::Reset,
-    }
 }
 
 type TerminalWriter = CrosstermBackend<Box<dyn Write + Send>>;

@@ -240,33 +240,11 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        // --- Corrected Logic Block ---
         let ls_style = ls_colors.style_for_path(entry.path()).cloned().unwrap_or_default();
         let mut styled_name = name.to_string().normal();
 
         if let Some(fg) = ls_style.foreground {
-            use lscolors::Color as LsColor;
-            let color = match fg {
-                LsColor::Black => colored::Color::Black,
-                LsColor::Red => colored::Color::Red,
-                LsColor::Green => colored::Color::Green,
-                LsColor::Yellow => colored::Color::Yellow,
-                LsColor::Blue => colored::Color::Blue,
-                LsColor::Magenta => colored::Color::Magenta,
-                LsColor::Cyan => colored::Color::Cyan,
-                LsColor::White => colored::Color::White,
-                LsColor::BrightBlack => colored::Color::BrightBlack,
-                LsColor::BrightRed => colored::Color::BrightRed,
-                LsColor::BrightGreen => colored::Color::BrightGreen,
-                LsColor::BrightYellow => colored::Color::BrightYellow,
-                LsColor::BrightBlue => colored::Color::BrightBlue,
-                LsColor::BrightMagenta => colored::Color::BrightMagenta,
-                LsColor::BrightCyan => colored::Color::BrightCyan,
-                LsColor::BrightWhite => colored::Color::BrightWhite,
-                LsColor::Fixed(_) => colored::Color::White,
-                LsColor::RGB(r, g, b) => colored::Color::TrueColor { r, g, b },
-            };
-            styled_name = styled_name.color(color);
+            styled_name = styled_name.color(crate::color::ls_to_colored(fg));
         }
 
         if ls_style.font_style.bold {

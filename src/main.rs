@@ -5,6 +5,7 @@
 
 // Declare the modules that make up the application.
 mod app;
+mod color;
 mod git;
 mod icons;
 mod sort;
