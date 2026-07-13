@@ -32,7 +32,7 @@ jobs:
 
     # 2. Cache the cargo directories to speed up future builds
     - name: Cache cargo dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
