@@ -112,6 +112,56 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 
 -----
 
+## Output formats
+
+Besides the default tree view, `lstr` can emit JSON for scripting or a
+self-contained HTML directory index for browsing offline. For example,
+`lstr --output html -s assets` on a small project produces:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>assets</title>
+<style>...</style>
+</head>
+<body>
+<h1>assets</h1>
+<ul>
+<li class="dir"><details open><summary>data</summary>
+<ul>
+<li class="file"><a href="data/config.yaml">config.yaml</a> <span class="meta">(153 B)</span></li>
+<li class="file"><a href="data/database.sqlite">database.sqlite</a> <span class="meta">(54 B)</span></li>
+<li class="file"><a href="data/sample.csv">sample.csv</a> <span class="meta">(87 B)</span></li>
+</ul>
+</details></li>
+<li class="dir"><details open><summary>fonts</summary>
+<ul>
+<li class="file"><a href="fonts/bold.woff2">bold.woff2</a> <span class="meta">(58 B)</span></li>
+<li class="file"><a href="fonts/regular.ttf">regular.ttf</a> <span class="meta">(56 B)</span></li>
+</ul>
+</details></li>
+<li class="dir"><details open><summary>images</summary>
+<ul>
+<li class="file"><a href="images/banner.jpg">banner.jpg</a> <span class="meta">(58 B)</span></li>
+<li class="file"><a href="images/favicon.ico">favicon.ico</a> <span class="meta">(56 B)</span></li>
+<li class="file"><a href="images/logo.png">logo.png</a> <span class="meta">(57 B)</span></li>
+</ul>
+</details></li>
+</ul>
+<p class="footer">3 directories, 8 files</p>
+</body>
+</html>
+```
+
+Directories render as collapsible `<details>` elements and files as
+relative links, so the page can be saved next to the tree it describes and
+opened directly in a browser. `-s`, `-p`, and `-G` add size, permissions,
+and git-status annotations, same as the other output formats.
+
+-----
+
 ## Interactive mode
 
 Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.

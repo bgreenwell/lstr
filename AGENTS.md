@@ -27,7 +27,7 @@ into `main` and tag `vX.Y.Z` there (see `RELEASE_CHECKLIST.md`).
 | :--------- | :------------- |
 | `main.rs`  | Entry point; dispatches to `view::run` or `tui::run`. |
 | `app.rs`   | clap CLI. Shared flags live in `CommonArgs`, flattened into `ViewArgs` and `InteractiveArgs` — declare a shared flag once, there. |
-| `view.rs`  | Classic mode. Pipeline: walk → filter (`--dirs-only`) → sort → count → `--du` sizes → display limits (`TreeNode` list) → render (text or JSON). |
+| `view.rs`  | Classic mode. Pipeline: walk → filter (`--dirs-only`) → sort → count → `--du` sizes → display limits (`TreeNode` list) → render (text, JSON, or HTML). |
 | `tui.rs`   | Interactive mode: `AppState`, `handle_key`/`handle_mouse`, terminal setup/teardown, editor suspend/resume. |
 | `sort.rs`  | `sort_entries_hierarchically` (DFS-order preserving) built on decorate-sort-undecorate `SortKey`s. |
 | `git.rs`   | git2 status cache keyed by repo-relative path; file statuses propagate to ancestor directories (most severe wins). |
@@ -39,9 +39,9 @@ into `main` and tag `vX.Y.Z` there (see `RELEASE_CHECKLIST.md`).
 
 - **Entries are in depth-first order** after `sort_entries_hierarchically`
   (every entry's parent precedes it). `build_tree_info`,
-  `apply_display_limits`, `compute_cumulative_sizes`, and the JSON renderer
-  all assume it. Never sort or filter in a way that reorders parents after
-  children.
+  `apply_display_limits`, `compute_cumulative_sizes`, and the JSON/HTML
+  renderers all assume it. Never sort or filter in a way that reorders
+  parents after children.
 - **Filter before connector computation.** Anything that removes entries
   (`--dirs-only`, display limits) must happen before `build_tree_info`, or
   suppressed entries count as siblings and connectors come out wrong.
