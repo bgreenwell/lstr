@@ -45,11 +45,11 @@ All of the following are now automated via GitHub Actions:
   - Manual: `cargo publish` from the tagged commit (not automated)
 
 - [ ] **AUR** package updated at [lstr-bin](https://aur.archlinux.org/packages/lstr-bin)
-  - Currently **community-maintained** (by Dominiquini; `lstr-git` by
-    bakatrouble is also community-maintained — see issue #15). Verify the
-    maintainer picks up the new version, or nudge on the AUR page.
-  - `.github/workflows/publish-aur.yml` is manual-only until co-maintainer
-    access is arranged; then restore its tag trigger.
+  - Co-maintainer access granted (see issue #15); `.github/workflows/publish-aur.yml`
+    now publishes automatically on tag push. This is its first real run —
+    verify it succeeds rather than assuming.
+  - `lstr-git` (by bakatrouble) is separately community-maintained; no
+    action needed from this pipeline.
 
 - [ ] **WinGet** manifest PR created to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
   - Automated by: `.github/workflows/publish-winget.yml`
