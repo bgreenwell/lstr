@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Interactive-mode search (`/`) supports glob wildcards (`*`, `?`) when the query contains one
+- `--output html` renders a self-contained, collapsible HTML directory index
 
 ### Changed
 

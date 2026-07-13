@@ -34,7 +34,7 @@ A fast, minimalist directory tree viewer, written in Rust. Inspired by the comma
       - Respects your `.gitignore` files with the `-g` flag.
       - Control recursion depth (`-L`) or show only directories (`-d`).
       - Summarize deep or crowded directories with `--file-depth` and `--max-items`.
-  - **Scriptable:** JSON output (`--output json`), pipe-friendly text, and a `Ctrl+s` file-picker mode for shell integration.
+  - **Scriptable:** JSON output (`--output json`), a self-contained HTML directory index (`--output html`), pipe-friendly text, and a `Ctrl+s` file-picker mode for shell integration.
 
 ## Installation
 
@@ -98,7 +98,7 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `--file-depth <LEVEL>` | Hide individual files below this depth, summarized as `[+N files]` (classic mode only). |
 | `--max-items <N>`      | Show at most N entries per directory, summarized as `[+N more]` (classic mode only). |
 | `--du`                 | Show directories with the cumulative size of their contents, like `tree --du`; implies `-s` (classic mode only). |
-| `--output <FORMAT>`    | Output format: `text` (default) or `json` (classic mode only).              |
+| `--output <FORMAT>`    | Output format: `text` (default), `json`, or `html` (classic mode only).     |
 | `-p`, `--permissions`  | Display file permissions (Unix-like systems only).                          |
 | `-s`, `--size`         | Display the size of files.                                                  |
 | `--sort <TYPE>`        | Sort entries by the specified criteria (`name`, `size`, `modified`, `extension`). |

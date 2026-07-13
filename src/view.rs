@@ -133,19 +133,36 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 
     let nodes = apply_display_limits(entries, args.file_depth, args.max_items);
 
-    if !text_mode {
-        let json = render_json(
-            args,
-            &nodes,
-            dir_count,
-            file_count,
-            status_cache,
-            root_in_repo.as_ref(),
-            du_map,
-            du_total,
-        );
-        let _ = writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&json)?);
-        return Ok(());
+    match args.output {
+        crate::app::OutputFormat::Json => {
+            let json = render_json(
+                args,
+                &nodes,
+                dir_count,
+                file_count,
+                status_cache,
+                root_in_repo.as_ref(),
+                du_map,
+                du_total,
+            );
+            let _ = writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&json)?);
+            return Ok(());
+        }
+        crate::app::OutputFormat::Html => {
+            let html = render_html(
+                args,
+                &nodes,
+                dir_count,
+                file_count,
+                status_cache,
+                root_in_repo.as_ref(),
+                du_map,
+                du_total,
+            );
+            let _ = write!(io::stdout(), "{html}");
+            return Ok(());
+        }
+        crate::app::OutputFormat::Text => {}
     }
 
     // Build tree structure information
@@ -469,6 +486,187 @@ fn render_json(
         "contents": contents,
         "report": report,
     })
+}
+
+const HTML_STYLE: &str = r#"<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 2rem; line-height: 1.5; }
+  h1 { font-size: 1.1rem; word-break: break-all; }
+  ul { list-style: none; padding-left: 1.25rem; margin: 0; }
+  li { white-space: nowrap; }
+  li.dir > details > summary { cursor: pointer; font-weight: 600; }
+  li.file a { text-decoration: inherit; color: inherit; }
+  li.file a:hover { text-decoration: underline; }
+  .meta { opacity: 0.6; font-weight: normal; font-size: 0.9em; }
+  .footer { opacity: 0.6; margin-top: 1rem; }
+</style>"#;
+
+/// Escapes text for safe inclusion in HTML content and `href`/attribute
+/// values (filenames are untrusted input as far as HTML output is
+/// concerned).
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Renders the node list as a self-contained HTML directory index (in the
+/// spirit of `tree -H`): a nested `<ul>` where directories are collapsible
+/// `<details>` elements and files are relative links, so the page can be
+/// dropped next to the walked tree and browsed locally. Optional per-entry
+/// annotations (`size`, `permissions`, `git_status`) mirror the flags that
+/// control them in text/JSON output.
+#[allow(clippy::too_many_arguments)]
+fn render_html(
+    args: &ViewArgs,
+    nodes: &[TreeNode],
+    dir_count: usize,
+    file_count: usize,
+    status_cache: Option<&git::StatusCache>,
+    root_in_repo: Option<&std::path::PathBuf>,
+    du_map: Option<&std::collections::HashMap<std::path::PathBuf, u64>>,
+    du_total: Option<u64>,
+) -> String {
+    use std::fmt::Write as _;
+
+    fn entry_meta(
+        entry: &ignore::DirEntry,
+        is_dir: bool,
+        args: &ViewArgs,
+        status_cache: Option<&git::StatusCache>,
+        root_in_repo: Option<&std::path::PathBuf>,
+        du_map: Option<&std::collections::HashMap<std::path::PathBuf, u64>>,
+    ) -> String {
+        let size_enabled = args.common.size || args.du;
+        let metadata =
+            if size_enabled || args.common.permissions { entry.metadata().ok() } else { None };
+
+        let mut parts = Vec::new();
+        if args.common.permissions {
+            if let Some(md) = &metadata {
+                parts.push(utils::permission_string(md));
+            }
+        }
+        if size_enabled {
+            let size = if is_dir {
+                du_map.and_then(|map| map.get(entry.path())).copied()
+            } else {
+                metadata.as_ref().map(|m| m.len())
+            };
+            if let Some(size) = size {
+                parts.push(utils::format_size(size));
+            }
+        }
+        if let (Some(cache), Some(base)) = (status_cache, root_in_repo) {
+            if let Some(status) = entry
+                .path()
+                .strip_prefix(&args.common.path)
+                .ok()
+                .and_then(|rel| cache.get(&base.join(rel)))
+            {
+                parts.push(status.get_char().to_string());
+            }
+        }
+
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" <span class=\"meta\">({})</span>", html_escape(&parts.join(", ")))
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_level(
+        nodes: &[TreeNode],
+        index: &mut usize,
+        depth: usize,
+        args: &ViewArgs,
+        status_cache: Option<&git::StatusCache>,
+        root_in_repo: Option<&std::path::PathBuf>,
+        du_map: Option<&std::collections::HashMap<std::path::PathBuf, u64>>,
+        out: &mut String,
+    ) {
+        out.push_str("<ul>\n");
+        while *index < nodes.len() && nodes[*index].depth() == depth {
+            match &nodes[*index] {
+                TreeNode::Summary { hidden_files, hidden_items, .. } => {
+                    *index += 1;
+                    let label = summary_label(*hidden_files, *hidden_items);
+                    let _ = writeln!(out, "<li class=\"meta\">{}</li>", html_escape(&label));
+                }
+                TreeNode::Entry(entry) => {
+                    *index += 1;
+                    let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                    let name = html_escape(&entry.file_name().to_string_lossy());
+                    let meta = entry_meta(entry, is_dir, args, status_cache, root_in_repo, du_map);
+
+                    if is_dir {
+                        let _ = writeln!(
+                            out,
+                            "<li class=\"dir\"><details open><summary>{name}{meta}</summary>"
+                        );
+                        build_level(
+                            nodes,
+                            index,
+                            depth + 1,
+                            args,
+                            status_cache,
+                            root_in_repo,
+                            du_map,
+                            out,
+                        );
+                        out.push_str("</details></li>\n");
+                    } else {
+                        let href = html_escape(
+                            &entry
+                                .path()
+                                .strip_prefix(&args.common.path)
+                                .unwrap_or(entry.path())
+                                .to_string_lossy(),
+                        );
+                        let _ = writeln!(
+                            out,
+                            "<li class=\"file\"><a href=\"{href}\">{name}</a>{meta}</li>"
+                        );
+                    }
+                }
+            }
+        }
+        out.push_str("</ul>\n");
+    }
+
+    let root = html_escape(&args.common.path.display().to_string());
+    let mut out = String::new();
+    out.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
+    let _ = writeln!(out, "<title>{root}</title>");
+    out.push_str(HTML_STYLE);
+    out.push_str("\n</head>\n<body>\n");
+    let _ = writeln!(out, "<h1>{root}</h1>");
+
+    let mut index = 0;
+    build_level(nodes, &mut index, 1, args, status_cache, root_in_repo, du_map, &mut out);
+
+    let footer = match du_total {
+        Some(total) => {
+            format!(
+                "{} used in {dir_count} directories, {file_count} files",
+                utils::format_size(total)
+            )
+        }
+        None => format!("{dir_count} directories, {file_count} files"),
+    };
+    let _ = writeln!(out, "<p class=\"footer\">{}</p>", html_escape(&footer));
+    out.push_str("</body>\n</html>\n");
+    out
 }
 
 /// A renderable line in the tree: a real entry, or a per-directory summary

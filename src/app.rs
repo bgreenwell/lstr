@@ -131,6 +131,8 @@ pub enum OutputFormat {
     Text,
     /// Machine-readable JSON
     Json,
+    /// Self-contained HTML directory index
+    Html,
 }
 
 /// Implements the Display trait for OutputFormat to show possible values in help messages.

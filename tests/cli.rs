@@ -699,6 +699,32 @@ fn test_json_output() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_html_output() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("sub"))?;
+    fs::write(temp_dir.path().join("sub/inner.txt"), "hello")?;
+    // Angle brackets/ampersands must be escaped, not injected as markup.
+    let weird_name = if cfg!(windows) { "weird name.txt" } else { "a&b<c>.txt" };
+    fs::write(temp_dir.path().join(weird_name), "x")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--output").arg("html").arg("-s").arg(temp_dir.path());
+    let output = cmd.output()?;
+    assert!(output.status.success());
+    let html = String::from_utf8(output.stdout)?;
+
+    assert!(html.starts_with("<!doctype html>"));
+    assert!(html.contains("<li class=\"dir\"><details open><summary>sub"));
+    assert!(html.contains("<a href=\"sub/inner.txt\">inner.txt</a>"));
+    assert!(html.contains("1 directories, 2 files"));
+    if !cfg!(windows) {
+        assert!(html.contains("a&amp;b&lt;c&gt;.txt"));
+        assert!(!html.contains("a&b<c>.txt"));
+    }
+    Ok(())
+}
+
+#[test]
 fn test_du_cumulative_directory_sizes() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempdir()?;
     fs::create_dir(temp_dir.path().join("sub"))?;
