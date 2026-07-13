@@ -519,6 +519,13 @@ fn html_escape(s: &str) -> String {
     out
 }
 
+/// Joins path components with `/` regardless of platform, since an HTML
+/// `href` needs a URL-style separator even on Windows, where
+/// `Path::to_string_lossy` would otherwise yield backslashes.
+fn path_to_href(path: &std::path::Path) -> String {
+    path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
 /// Renders the node list as a self-contained HTML directory index (in the
 /// spirit of `tree -H`): a nested `<ul>` where directories are collapsible
 /// `<details>` elements and files are relative links, so the page can be
@@ -626,13 +633,9 @@ fn render_html(
                         );
                         out.push_str("</details></li>\n");
                     } else {
-                        let href = html_escape(
-                            &entry
-                                .path()
-                                .strip_prefix(&args.common.path)
-                                .unwrap_or(entry.path())
-                                .to_string_lossy(),
-                        );
+                        let href = html_escape(&path_to_href(
+                            entry.path().strip_prefix(&args.common.path).unwrap_or(entry.path()),
+                        ));
                         let _ = writeln!(
                             out,
                             "<li class=\"file\"><a href=\"{href}\">{name}</a>{meta}</li>"
