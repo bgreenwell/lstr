@@ -1,5 +1,7 @@
 # AGENTS.md
 
+@../CLAUDE.md
+
 Development guide for `lstr`, a directory tree viewer with a classic
 `tree`-style CLI mode and an interactive TUI. Read this before making
 changes; it records the architecture, invariants, and testing conventions
@@ -8,13 +10,10 @@ that are easy to break from the outside.
 ## Commands
 
 ```bash
-cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test  # the CI gates
 cargo test test_name -- --nocapture     # single test
 ./scripts/validate-basic.sh             # classic-mode output vs golden baselines
 ./scripts/test-dual-mode.sh             # classic + TUI consistency checks
 ```
-
-All three CI gates must pass before committing.
 
 Branch model: `devel` is the default and integration branch; `main` tracks
 releases. Never commit directly to either — branch off `devel`
@@ -77,12 +76,7 @@ into `main` and tag `vX.Y.Z` there (see `RELEASE_CHECKLIST.md`).
 
 ## Conventions
 
-- Errors: `anyhow::Result` with `.context()` at the app layer; no
-  `unwrap()`/`expect()` outside tests without a justifying comment.
-- Commits: imperative mood, first line under 72 characters, no AI
-  signatures or Co-Authored-By trailers.
-- `CHANGELOG.md`: Keep a Changelog format, one line per user-facing change
-  under `[Unreleased]`.
+- Commits: no AI signatures or Co-Authored-By trailers.
 - Sort-flag precedence (documented in help text and README):
   `--dotfiles-first` implies `--dirs-first`; `--natural-sort` takes
   precedence over `--case-sensitive`; name-comparison flags do not affect

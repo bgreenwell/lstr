@@ -9,6 +9,7 @@ use crate::git::{self, StatusCache};
 use crate::icons;
 use crate::sort;
 use crate::utils;
+use globset::GlobBuilder;
 use ignore::WalkBuilder;
 use lscolors::LsColors;
 use ratatui::crossterm::{
@@ -309,13 +310,24 @@ impl AppState {
     }
 
     /// Apply current search query to filter visible entries
+    ///
+    /// A query containing `*` or `?` is treated as a case-insensitive glob
+    /// pattern matched against the whole filename; otherwise it's a plain
+    /// case-insensitive substring match. Falls back to substring matching
+    /// if the query doesn't compile as a valid glob (e.g. an unterminated
+    /// `[`), so a malformed pattern doesn't just hide everything.
     fn apply_search_filter(&mut self) {
         if self.search_mode == SearchMode::None || self.search_query.is_empty() {
             // If no search or empty query, show original entries
             self.visible_entries = self.original_visible_entries.clone();
         } else {
-            // Filter entries based on search query (case-insensitive filename match)
-            let query_lower = self.search_query.to_lowercase();
+            let query = &self.search_query;
+            let query_lower = query.to_lowercase();
+            let glob = if query.contains('*') || query.contains('?') {
+                Self::compile_glob(query)
+            } else {
+                None
+            };
             self.visible_entries = self
                 .original_visible_entries
                 .iter()
@@ -324,7 +336,10 @@ impl AppState {
                         .path
                         .file_name()
                         .and_then(|name| name.to_str())
-                        .map(|name| name.to_lowercase().contains(&query_lower))
+                        .map(|name| match &glob {
+                            Some(matcher) => matcher.is_match(name),
+                            None => name.to_lowercase().contains(&query_lower),
+                        })
                         .unwrap_or(false)
                 })
                 .cloned()
@@ -340,6 +355,16 @@ impl AppState {
                 self.list_state.select(selection);
             }
         }
+    }
+
+    /// Compile a search query as a case-insensitive glob matcher, if valid.
+    fn compile_glob(query: &str) -> Option<globset::GlobMatcher> {
+        GlobBuilder::new(query)
+            .case_insensitive(true)
+            .literal_separator(false)
+            .build()
+            .ok()
+            .map(|g| g.compile_matcher())
     }
 }
 
@@ -858,6 +883,62 @@ mod tests {
             handle_key(&mut app_state, key(KeyCode::Char(c)));
         }
         assert_eq!(app_state.search_query, "c+#(");
+    }
+
+    #[test]
+    fn test_search_plain_query_is_still_substring_match() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['r', 'e', 'a', 'd'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert_eq!(app_state.visible_entries[0].path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_search_wildcard_star_matches_by_extension() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(0));
+        app_state.toggle_selected_directory(); // expand src -> src, src/main.rs, README.md
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['*', '.', 'r', 's'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert_eq!(app_state.visible_entries[0].path, PathBuf::from("src/main.rs"));
+    }
+
+    #[test]
+    fn test_search_wildcard_question_mark_matches_single_char() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in "REA?ME.md".chars() {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert_eq!(app_state.visible_entries[0].path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_search_invalid_glob_falls_back_to_substring() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        // Unterminated character class, but still contains a wildcard char
+        // so it takes the glob path; must fall back without panicking.
+        for c in "*[abc".chars() {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(app_state.search_query, "*[abc");
+        assert!(app_state.visible_entries.is_empty());
+    }
+
+    #[test]
+    fn test_compile_glob_case_insensitive_and_invalid() {
+        let matcher = AppState::compile_glob("*.RS").expect("valid glob");
+        assert!(matcher.is_match("main.rs"));
+        assert!(!matcher.is_match("main.py"));
+        assert!(AppState::compile_glob("*[abc").is_none());
     }
 
     #[test]

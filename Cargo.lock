@@ -1031,6 +1031,7 @@ dependencies = [
  "clap",
  "colored",
  "git2",
+ "globset",
  "ignore",
  "lscolors",
  "natord",

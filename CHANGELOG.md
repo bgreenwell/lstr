@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Interactive-mode search (`/`) supports glob wildcards (`*`, `?`) when the query contains one
+
 ### Changed
 
 - Updated major dependencies: ratatui 0.30, colored 3, lscolors 0.21, git2 0.21, clap 4.6

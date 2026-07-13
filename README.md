@@ -125,7 +125,7 @@ Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.
 | `←` / `h` | Collapse the selected directory, or jump to and collapse its parent. |
 | `→` / `l` | Same as `Enter`. |
 | `Enter` | **Context-aware action:**<br>- If on a file: Open it in the configured editor (`--editor`, `$VISUAL`, or `$EDITOR`), then return to the tree.<br>- If on a directory: Toggle expand/collapse. |
-| `/` | Search: filter entries by name as you type. `Esc` exits search. |
+| `/` | Search: filter entries by name as you type (substring, or a glob like `*.rs` / `test_?.py` if the query contains `*` or `?`). `Esc` exits search. |
 | `q` / `Esc` | Quit the application normally. |
 | `Ctrl`+`s` | **Shell integration:** Quits and prints the selected path to stdout. |
 | Mouse | Scroll wheel moves the selection; click selects a row; clicking the selected entry activates it (open file / toggle directory). Hold `Shift` for normal terminal text selection. |
