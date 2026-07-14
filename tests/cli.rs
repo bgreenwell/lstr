@@ -144,12 +144,18 @@ fn test_git_status_flag() -> Result<(), Box<dyn std::error::Error>> {
         .output()?;
 
     fs::write(temp_path.join("committed.txt"), "initial content")?;
-    Command::new("git").args(["add", "committed.txt"]).current_dir(temp_path).output()?;
+    fs::write(temp_path.join("old-name.txt"), vec![b'r'; 1024])?;
+    Command::new("git")
+        .args(["add", "committed.txt", "old-name.txt"])
+        .current_dir(temp_path)
+        .output()?;
     Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(temp_path).output()?;
 
     fs::write(temp_path.join("committed.txt"), "modified content")?;
     fs::write(temp_path.join("staged.txt"), "staged")?;
     Command::new("git").args(["add", "staged.txt"]).current_dir(temp_path).output()?;
+    fs::rename(temp_path.join("old-name.txt"), temp_path.join("new-name.txt"))?;
+    Command::new("git").args(["add", "-A"]).current_dir(temp_path).output()?;
     fs::write(temp_path.join("untracked.txt"), "untracked")?;
 
     let mut cmd = Command::cargo_bin("lstr")?;
@@ -159,7 +165,19 @@ fn test_git_status_flag() -> Result<(), Box<dyn std::error::Error>> {
         .success()
         .stdout(predicate::str::is_match(r"M\s+.*committed\.txt").unwrap())
         .stdout(predicate::str::is_match(r"A\s+.*staged\.txt").unwrap())
+        .stdout(predicate::str::is_match(r"R\s+.*new-name\.txt").unwrap())
         .stdout(predicate::str::is_match(r"\?\s+.*untracked\.txt").unwrap());
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-G").arg("-a").arg("--output").arg("json").arg(temp_path);
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+    let renamed = json["contents"]
+        .as_array()
+        .expect("root contents")
+        .iter()
+        .find(|entry| entry["name"] == "new-name.txt")
+        .expect("renamed file should be listed");
+    assert_eq!(renamed["git_status"], "R");
 
     Ok(())
 }
