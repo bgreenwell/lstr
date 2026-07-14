@@ -210,6 +210,32 @@ fn test_dirs_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_reverse_preserves_dirs_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    for name in ["dir-a", "dir-z"] {
+        fs::create_dir(temp_dir.path().join(name))?;
+    }
+    for name in ["file-a.txt", "file-z.txt"] {
+        fs::File::create(temp_dir.path().join(name))?;
+    }
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--dirs-first").arg("--reverse").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let positions = ["dir-z", "dir-a", "file-z.txt", "file-a.txt"].map(|name| {
+        stdout
+            .lines()
+            .position(|line| line.contains(&format!("── {name}")))
+            .expect("entry should be listed")
+    });
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{stdout}");
+
+    Ok(())
+}
+
+#[test]
 fn test_natural_sorting() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempdir()?;
     fs::File::create(temp_dir.path().join("file1.txt"))?;
@@ -366,6 +392,42 @@ fn test_dotfiles_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
     assert!(dotfolder_line_pos < folder_line_pos);
     assert!(folder_line_pos < hidden_line_pos);
     assert!(hidden_line_pos < regular_line_pos);
+
+    Ok(())
+}
+
+#[test]
+fn test_reverse_preserves_dotfiles_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    for name in [".dotdir-a", ".dotdir-z", "dir-a", "dir-z"] {
+        fs::create_dir(temp_dir.path().join(name))?;
+    }
+    for name in [".dotfile-a", ".dotfile-z", "file-a.txt", "file-z.txt"] {
+        fs::File::create(temp_dir.path().join(name))?;
+    }
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--dotfiles-first").arg("-a").arg("--reverse").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let positions = [
+        ".dotdir-z",
+        ".dotdir-a",
+        "dir-z",
+        "dir-a",
+        ".dotfile-z",
+        ".dotfile-a",
+        "file-z.txt",
+        "file-a.txt",
+    ]
+    .map(|name| {
+        stdout
+            .lines()
+            .position(|line| line.contains(&format!("── {name}")))
+            .expect("entry should be listed")
+    });
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{stdout}");
 
     Ok(())
 }
