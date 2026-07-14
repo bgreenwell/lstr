@@ -768,3 +768,23 @@ fn test_du_cumulative_directory_sizes() -> Result<(), Box<dyn std::error::Error>
     assert!(json["report"]["total_size"].as_u64().expect("total present") >= 160);
     Ok(())
 }
+
+#[test]
+fn test_du_dirs_only_counts_hidden_file_contents() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("sub"))?;
+    fs::write(temp_dir.path().join("sub/payload.bin"), vec![b'x'; 100])?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--du").arg("-d").arg("--output").arg("json").arg(temp_dir.path());
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+
+    let contents = json["contents"].as_array().expect("root contents");
+    assert_eq!(contents.len(), 1);
+    let sub = contents.iter().find(|e| e["name"] == "sub").expect("sub in json");
+    assert!(sub["size"].as_u64().expect("dir size present") >= 100);
+    assert_eq!(json["report"]["directories"], 1);
+    assert_eq!(json["report"]["files"], 0);
+    assert!(json["report"]["total_size"].as_u64().expect("total present") >= 100);
+    Ok(())
+}
