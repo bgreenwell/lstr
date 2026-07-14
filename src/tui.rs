@@ -71,6 +71,8 @@ struct AppState {
     search_query: String,
     /// Backup of visible entries before search/filter was applied
     original_visible_entries: Vec<FileEntry>,
+    /// Selection when search started, used if the query has no matches.
+    search_selection_path: Option<PathBuf>,
 }
 
 impl AppState {
@@ -96,6 +98,7 @@ impl AppState {
             search_mode: SearchMode::None,
             search_query: String::new(),
             original_visible_entries: Vec::new(),
+            search_selection_path: None,
         };
         app_state.regenerate_visible_entries();
         if !app_state.visible_entries.is_empty() {
@@ -129,6 +132,7 @@ impl AppState {
         self.search_mode = SearchMode::None;
         self.search_query.clear();
         self.original_visible_entries.clear();
+        self.search_selection_path = None;
         self.regenerate_visible_entries();
 
         let selection = selected_path
@@ -266,6 +270,7 @@ impl AppState {
     fn enter_search_mode(&mut self) {
         if self.search_mode == SearchMode::None {
             self.original_visible_entries = self.visible_entries.clone();
+            self.search_selection_path = self.get_selected_entry().map(|entry| entry.path.clone());
         }
         self.search_mode = SearchMode::Search;
         self.search_query.clear();
@@ -274,10 +279,14 @@ impl AppState {
     /// Exit search/filter mode and restore original view
     fn exit_search_mode(&mut self) {
         if self.search_mode != SearchMode::None {
-            let selected_path = self.get_selected_entry().map(|e| e.path.clone());
+            let selected_path = self
+                .get_selected_entry()
+                .map(|entry| entry.path.clone())
+                .or_else(|| self.search_selection_path.clone());
             self.visible_entries = std::mem::take(&mut self.original_visible_entries);
             self.search_mode = SearchMode::None;
             self.search_query.clear();
+            self.search_selection_path = None;
 
             // Keep the entry that was highlighted in the filtered list
             // selected in the restored list.
@@ -317,6 +326,7 @@ impl AppState {
     /// if the query doesn't compile as a valid glob (e.g. an unterminated
     /// `[`), so a malformed pattern doesn't just hide everything.
     fn apply_search_filter(&mut self) {
+        let selected_path = self.get_selected_entry().map(|entry| entry.path.clone());
         if self.search_mode == SearchMode::None || self.search_query.is_empty() {
             // If no search or empty query, show original entries
             self.visible_entries = self.original_visible_entries.clone();
@@ -346,15 +356,12 @@ impl AppState {
                 .collect();
         }
 
-        // Keep the selection in bounds; select the first match when the
-        // previous selection is gone (or reappears after a backspace).
-        match self.list_state.selected() {
-            Some(selected) if selected < self.visible_entries.len() => {}
-            _ => {
-                let selection = if self.visible_entries.is_empty() { None } else { Some(0) };
-                self.list_state.select(selection);
-            }
-        }
+        // Keep the same entry selected when it remains in the filtered list;
+        // otherwise select the first match.
+        let selection = selected_path
+            .and_then(|path| self.visible_entries.iter().position(|entry| entry.path == path))
+            .or(if self.visible_entries.is_empty() { None } else { Some(0) });
+        self.list_state.select(selection);
     }
 
     /// Compile a search query as a case-insensitive glob matcher, if valid.
@@ -794,6 +801,7 @@ mod tests {
             search_mode: SearchMode::None,
             search_query: String::new(),
             original_visible_entries: Vec::new(),
+            search_selection_path: None,
         };
         app_state.regenerate_visible_entries();
         app_state.list_state.select(Some(0));
@@ -844,6 +852,7 @@ mod tests {
             search_mode: SearchMode::None,
             search_query: String::new(),
             original_visible_entries: Vec::new(),
+            search_selection_path: None,
         }
     }
 
@@ -996,6 +1005,36 @@ mod tests {
         handle_key(&mut app_state, key(KeyCode::Esc));
         assert!(!app_state.in_search_mode());
         assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn test_search_preserves_selection_when_a_prior_entry_is_filtered_out() {
+        let mut app_state = setup_test_app_state();
+        app_state.toggle_selected_directory();
+        app_state.list_state.select(Some(1));
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("src/main.rs"));
+
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        handle_key(&mut app_state, key(KeyCode::Char('m')));
+
+        assert_eq!(app_state.visible_entries.len(), 2);
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("src/main.rs"));
+    }
+
+    #[test]
+    fn test_exit_empty_search_restores_original_selection() {
+        let mut app_state = setup_test_app_state();
+        app_state.list_state.select(Some(1));
+        assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
+
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        for c in ['z', 'z', 'z'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        assert!(app_state.visible_entries.is_empty());
+
+        handle_key(&mut app_state, key(KeyCode::Esc));
         assert_eq!(app_state.get_selected_entry().unwrap().path, PathBuf::from("README.md"));
     }
 
