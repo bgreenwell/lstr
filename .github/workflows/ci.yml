@@ -1,60 +1,43 @@
-# This is the name of the workflow that will be displayed on GitHub
-name: Rust CI
+name: CI
 
-# This section defines when the workflow will run.
-# It will trigger on any `push` to any branch, and on any `pull_request`.
 on:
   push:
-    branches: [ "main", "devel" ]
+    branches: [main, devel]
   pull_request:
-    branches: [ "main", "devel" ]
+    branches: [main, devel]
 
-# This defines the environment for the workflow. We set Cargo to use color output.
 env:
   CARGO_TERM_COLOR: always
 
-# This section defines the jobs to be run. We have one job called "build".
 jobs:
-  build:
-    # The name that will be displayed for this job on GitHub
-    name: Test on ${{ matrix.os }}
-    
-    # This job will run on multiple operating systems to ensure cross-platform compatibility
+  test:
+    name: Build and Test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
-    # These are the individual steps the job will execute in order
     steps:
-    # 1. Check out the repository code so the workflow can access it
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    # 2. Cache the cargo directories to speed up future builds
-    - name: Cache cargo dependencies
-      uses: actions/cache@v6
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    # 3. Check that the code is formatted correctly
-    - name: Check formatting
-      run: cargo fmt -- --check
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
 
-    # 4. Run Clippy to check for common mistakes and enforce idiomatic Rust
-    #    The `-D warnings` flag treats all warnings as errors, failing the build.
-    - name: Run Clippy
-      run: cargo clippy -- -D warnings
+      - name: Check formatting (Unix only)
+        if: matrix.os != 'windows-latest'
+        run: cargo fmt --all -- --check
 
-    # 5. Run the tests (if any are defined)
-    - name: Run tests
-      run: cargo test --verbose
+      - name: Lint with Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
-    # 6. Build the project in release mode to ensure it compiles
-    - name: Build
-      run: cargo build --release --verbose
+      - name: Run tests
+        run: cargo test
+
+      - name: Check build
+        run: cargo build --release
