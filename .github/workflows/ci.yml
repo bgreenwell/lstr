@@ -28,7 +28,7 @@ jobs:
     # These are the individual steps the job will execute in order
     steps:
     # 1. Check out the repository code so the workflow can access it
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     # 2. Cache the cargo directories to speed up future builds
     - name: Cache cargo dependencies
