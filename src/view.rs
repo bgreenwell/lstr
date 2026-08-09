@@ -519,11 +519,19 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-/// Joins path components with `/` regardless of platform, since an HTML
-/// `href` needs a URL-style separator even on Windows, where
-/// `Path::to_string_lossy` would otherwise yield backslashes.
+/// Encodes a relative filesystem path for an HTML `href`. Each component
+/// is encoded separately so `/` continues to delimit directories, while
+/// filename characters such as `#`, `?`, and `:` cannot change URL meaning.
 fn path_to_href(path: &std::path::Path) -> String {
-    path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    let mut url = Url::parse("https://lstr.invalid/").expect("static URL is valid");
+    {
+        let mut segments = url.path_segments_mut().expect("base URL accepts path segments");
+        segments.pop_if_empty();
+        for component in path.components() {
+            segments.push(&component.as_os_str().to_string_lossy());
+        }
+    }
+    format!(".{}", url.path())
 }
 
 /// Renders the node list as a self-contained HTML directory index (in the

@@ -706,6 +706,13 @@ fn test_html_output() -> Result<(), Box<dyn std::error::Error>> {
     // Angle brackets/ampersands must be escaped, not injected as markup.
     let weird_name = if cfg!(windows) { "weird name.txt" } else { "a&b<c>.txt" };
     fs::write(temp_dir.path().join(weird_name), "x")?;
+    let url_name = "space # percent%.txt";
+    fs::write(temp_dir.path().join(url_name), "x")?;
+    // A colon in the first path component must not become a URL scheme.
+    let dangerous_name = if cfg!(windows) { None } else { Some("javascript:alert(1).txt") };
+    if let Some(name) = dangerous_name {
+        fs::write(temp_dir.path().join(name), "x")?;
+    }
 
     let mut cmd = Command::cargo_bin("lstr")?;
     cmd.arg("--output").arg("html").arg("-s").arg(temp_dir.path());
@@ -715,11 +722,17 @@ fn test_html_output() -> Result<(), Box<dyn std::error::Error>> {
 
     assert!(html.starts_with("<!doctype html>"));
     assert!(html.contains("<li class=\"dir\"><details open><summary>sub"));
-    assert!(html.contains("<a href=\"sub/inner.txt\">inner.txt</a>"));
-    assert!(html.contains("1 directories, 2 files"));
+    assert!(html.contains("<a href=\"./sub/inner.txt\">inner.txt</a>"));
+    assert!(html.contains("<a href=\"./space%20%23%20percent%25.txt\">space # percent%.txt</a>"));
+    assert!(html.contains(if cfg!(windows) {
+        "1 directories, 3 files"
+    } else {
+        "1 directories, 4 files"
+    }));
     if !cfg!(windows) {
         assert!(html.contains("a&amp;b&lt;c&gt;.txt"));
         assert!(!html.contains("a&b<c>.txt"));
+        assert!(html.contains("<a href=\"./javascript:alert(1).txt\">javascript:alert(1).txt</a>"));
     }
     Ok(())
 }
