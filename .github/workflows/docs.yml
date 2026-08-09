@@ -40,7 +40,7 @@ jobs:
         run: echo '<meta http-equiv="refresh" content="0; url=lstr">' > target/doc/index.html
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
