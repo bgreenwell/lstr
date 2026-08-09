@@ -102,15 +102,22 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         })
         .collect();
 
+    // Apply tree-aware sorting (preserves parent-child relationships)
+    let sort_options = args.common.to_sort_options();
+    sort::sort_entries_hierarchically(&mut entries, &sort_options);
+
+    // Cumulative sizes are computed over the full entry list, before output
+    // filtering or display limits, so `--dirs-only` does not change the size
+    // of the directory contents it displays.
+    let du_sizes = if args.du { Some(compute_cumulative_sizes(&entries)) } else { None };
+    let du_map = du_sizes.as_ref().map(|(map, _)| map);
+    let du_total = du_sizes.as_ref().map(|(_, total)| *total);
+
     // Filter before computing tree connectors so that skipped entries do
     // not count as siblings of the entries that are actually printed.
     if args.dirs_only {
         entries.retain(|entry| entry.file_type().is_some_and(|ft| ft.is_dir()));
     }
-
-    // Apply tree-aware sorting (preserves parent-child relationships)
-    let sort_options = args.common.to_sort_options();
-    sort::sort_entries_hierarchically(&mut entries, &sort_options);
 
     // The summary counts reflect the whole walked tree, including entries
     // hidden by --file-depth / --max-items (they are represented by the
@@ -123,12 +130,6 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         }
     }
 
-    // Cumulative sizes are computed over the full entry list, before any
-    // display limits, so a directory's size stays truthful even when its
-    // children are hidden.
-    let du_sizes = if args.du { Some(compute_cumulative_sizes(&entries)) } else { None };
-    let du_map = du_sizes.as_ref().map(|(map, _)| map);
-    let du_total = du_sizes.as_ref().map(|(_, total)| *total);
     let size_enabled = args.common.size || args.du;
 
     let nodes = apply_display_limits(entries, args.file_depth, args.max_items);
