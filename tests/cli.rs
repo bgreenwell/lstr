@@ -144,12 +144,18 @@ fn test_git_status_flag() -> Result<(), Box<dyn std::error::Error>> {
         .output()?;
 
     fs::write(temp_path.join("committed.txt"), "initial content")?;
-    Command::new("git").args(["add", "committed.txt"]).current_dir(temp_path).output()?;
+    fs::write(temp_path.join("old-name.txt"), vec![b'r'; 1024])?;
+    Command::new("git")
+        .args(["add", "committed.txt", "old-name.txt"])
+        .current_dir(temp_path)
+        .output()?;
     Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(temp_path).output()?;
 
     fs::write(temp_path.join("committed.txt"), "modified content")?;
     fs::write(temp_path.join("staged.txt"), "staged")?;
     Command::new("git").args(["add", "staged.txt"]).current_dir(temp_path).output()?;
+    fs::rename(temp_path.join("old-name.txt"), temp_path.join("new-name.txt"))?;
+    Command::new("git").args(["add", "-A"]).current_dir(temp_path).output()?;
     fs::write(temp_path.join("untracked.txt"), "untracked")?;
 
     let mut cmd = Command::cargo_bin("lstr")?;
@@ -159,7 +165,19 @@ fn test_git_status_flag() -> Result<(), Box<dyn std::error::Error>> {
         .success()
         .stdout(predicate::str::is_match(r"M\s+.*committed\.txt").unwrap())
         .stdout(predicate::str::is_match(r"A\s+.*staged\.txt").unwrap())
+        .stdout(predicate::str::is_match(r"R\s+.*new-name\.txt").unwrap())
         .stdout(predicate::str::is_match(r"\?\s+.*untracked\.txt").unwrap());
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("-G").arg("-a").arg("--output").arg("json").arg(temp_path);
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+    let renamed = json["contents"]
+        .as_array()
+        .expect("root contents")
+        .iter()
+        .find(|entry| entry["name"] == "new-name.txt")
+        .expect("renamed file should be listed");
+    assert_eq!(renamed["git_status"], "R");
 
     Ok(())
 }
@@ -205,6 +223,32 @@ fn test_dirs_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
     let file_pos = stdout.find("aaa_file.txt").unwrap();
 
     assert!(dir_pos < file_pos);
+
+    Ok(())
+}
+
+#[test]
+fn test_reverse_preserves_dirs_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    for name in ["dir-a", "dir-z"] {
+        fs::create_dir(temp_dir.path().join(name))?;
+    }
+    for name in ["file-a.txt", "file-z.txt"] {
+        fs::File::create(temp_dir.path().join(name))?;
+    }
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--dirs-first").arg("--reverse").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let positions = ["dir-z", "dir-a", "file-z.txt", "file-a.txt"].map(|name| {
+        stdout
+            .lines()
+            .position(|line| line.contains(&format!("── {name}")))
+            .expect("entry should be listed")
+    });
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{stdout}");
 
     Ok(())
 }
@@ -366,6 +410,42 @@ fn test_dotfiles_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
     assert!(dotfolder_line_pos < folder_line_pos);
     assert!(folder_line_pos < hidden_line_pos);
     assert!(hidden_line_pos < regular_line_pos);
+
+    Ok(())
+}
+
+#[test]
+fn test_reverse_preserves_dotfiles_first_sorting() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    for name in [".dotdir-a", ".dotdir-z", "dir-a", "dir-z"] {
+        fs::create_dir(temp_dir.path().join(name))?;
+    }
+    for name in [".dotfile-a", ".dotfile-z", "file-a.txt", "file-z.txt"] {
+        fs::File::create(temp_dir.path().join(name))?;
+    }
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--dotfiles-first").arg("-a").arg("--reverse").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let positions = [
+        ".dotdir-z",
+        ".dotdir-a",
+        "dir-z",
+        "dir-a",
+        ".dotfile-z",
+        ".dotfile-a",
+        "file-z.txt",
+        "file-a.txt",
+    ]
+    .map(|name| {
+        stdout
+            .lines()
+            .position(|line| line.contains(&format!("── {name}")))
+            .expect("entry should be listed")
+    });
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{stdout}");
 
     Ok(())
 }
@@ -706,6 +786,13 @@ fn test_html_output() -> Result<(), Box<dyn std::error::Error>> {
     // Angle brackets/ampersands must be escaped, not injected as markup.
     let weird_name = if cfg!(windows) { "weird name.txt" } else { "a&b<c>.txt" };
     fs::write(temp_dir.path().join(weird_name), "x")?;
+    let url_name = "space # percent%.txt";
+    fs::write(temp_dir.path().join(url_name), "x")?;
+    // A colon in the first path component must not become a URL scheme.
+    let dangerous_name = if cfg!(windows) { None } else { Some("javascript:alert(1).txt") };
+    if let Some(name) = dangerous_name {
+        fs::write(temp_dir.path().join(name), "x")?;
+    }
 
     let mut cmd = Command::cargo_bin("lstr")?;
     cmd.arg("--output").arg("html").arg("-s").arg(temp_dir.path());
@@ -715,11 +802,17 @@ fn test_html_output() -> Result<(), Box<dyn std::error::Error>> {
 
     assert!(html.starts_with("<!doctype html>"));
     assert!(html.contains("<li class=\"dir\"><details open><summary>sub"));
-    assert!(html.contains("<a href=\"sub/inner.txt\">inner.txt</a>"));
-    assert!(html.contains("1 directories, 2 files"));
+    assert!(html.contains("<a href=\"./sub/inner.txt\">inner.txt</a>"));
+    assert!(html.contains("<a href=\"./space%20%23%20percent%25.txt\">space # percent%.txt</a>"));
+    assert!(html.contains(if cfg!(windows) {
+        "1 directories, 3 files"
+    } else {
+        "1 directories, 4 files"
+    }));
     if !cfg!(windows) {
         assert!(html.contains("a&amp;b&lt;c&gt;.txt"));
         assert!(!html.contains("a&b<c>.txt"));
+        assert!(html.contains("<a href=\"./javascript:alert(1).txt\">javascript:alert(1).txt</a>"));
     }
     Ok(())
 }
@@ -766,5 +859,25 @@ fn test_du_cumulative_directory_sizes() -> Result<(), Box<dyn std::error::Error>
         .expect("sub in json");
     assert!(sub["size"].as_u64().expect("dir size present") >= 150);
     assert!(json["report"]["total_size"].as_u64().expect("total present") >= 160);
+    Ok(())
+}
+
+#[test]
+fn test_du_dirs_only_counts_hidden_file_contents() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::create_dir(temp_dir.path().join("sub"))?;
+    fs::write(temp_dir.path().join("sub/payload.bin"), vec![b'x'; 100])?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--du").arg("-d").arg("--output").arg("json").arg(temp_dir.path());
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+
+    let contents = json["contents"].as_array().expect("root contents");
+    assert_eq!(contents.len(), 1);
+    let sub = contents.iter().find(|e| e["name"] == "sub").expect("sub in json");
+    assert!(sub["size"].as_u64().expect("dir size present") >= 100);
+    assert_eq!(json["report"]["directories"], 1);
+    assert_eq!(json["report"]["files"], 0);
+    assert!(json["report"]["total_size"].as_u64().expect("total present") >= 100);
     Ok(())
 }

@@ -76,14 +76,7 @@ pub fn sort_entries(entries: &mut Vec<DirEntry>, options: &SortOptions) {
     // comparisons avoid repeated metadata syscalls and string allocations.
     let mut decorated: Vec<(SortKey, DirEntry)> =
         std::mem::take(entries).into_iter().map(|e| (SortKey::new(&e, options), e)).collect();
-    decorated.sort_by(|(key_a, a), (key_b, b)| {
-        let result = compare_keyed(key_a, a, key_b, b, options);
-        if options.reverse {
-            result.reverse()
-        } else {
-            result
-        }
-    });
+    decorated.sort_by(|(key_a, a), (key_b, b)| compare_keyed(key_a, a, key_b, b, options));
     entries.extend(decorated.into_iter().map(|(_, entry)| entry));
 }
 
@@ -223,8 +216,9 @@ fn compare_keyed(
         }
     }
 
-    // Apply the primary sorting strategy
-    match options.sort_type {
+    // Apply the primary sorting strategy. Reverse affects ordering within a
+    // group, but not the grouping precedence established above.
+    let result = match options.sort_type {
         SortType::Name => compare_by_name_keyed(key_a, a, key_b, b, options),
         SortType::Size => key_a.size.cmp(&key_b.size),
         SortType::Modified => match (key_a.modified, key_b.modified) {
@@ -242,6 +236,11 @@ fn compare_keyed(
                 ext_cmp
             }
         }
+    };
+    if options.reverse {
+        result.reverse()
+    } else {
+        result
     }
 }
 

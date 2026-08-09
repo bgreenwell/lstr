@@ -75,18 +75,33 @@ pub fn load_status(start_path: &Path) -> anyhow::Result<Option<GitRepoStatus>> {
 
     let mut cache = StatusCache::new();
     let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true).include_ignored(false).recurse_untracked_dirs(true);
+    opts.include_untracked(true)
+        .include_ignored(false)
+        .recurse_untracked_dirs(true)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true);
 
     let statuses = repo.statuses(Some(&mut opts))?;
 
     for entry in statuses.iter() {
-        let Some(status) = git_to_file_status(entry.status()) else {
+        let entry_status = entry.status();
+        let Some(status) = git_to_file_status(entry_status) else {
             continue;
         };
 
-        if let Ok(path_str) = entry.path() {
+        let path = if entry_status.is_index_renamed() {
+            // `StatusEntry::path` is the old path for a rename, while the
+            // tree contains the new path that needs the status marker.
+            entry.head_to_index().and_then(|delta| delta.new_file().path().map(PathBuf::from))
+        } else if entry_status.is_wt_renamed() {
+            entry.index_to_workdir().and_then(|delta| delta.new_file().path().map(PathBuf::from))
+        } else {
+            entry.path().ok().map(PathBuf::from)
+        };
+
+        if let Some(path) = path {
             // Use the relative path directly as the key.
-            cache.insert(PathBuf::from(path_str), status);
+            cache.insert(path, status);
         }
     }
 
@@ -122,6 +137,9 @@ fn git_to_file_status(s: git2::Status) -> Option<FileStatus> {
     if s.is_conflicted() {
         return Some(FileStatus::Conflicted);
     }
+    if s.is_index_renamed() {
+        return Some(FileStatus::Renamed);
+    }
     if s.is_index_new() {
         return Some(FileStatus::New);
     }
@@ -131,23 +149,20 @@ fn git_to_file_status(s: git2::Status) -> Option<FileStatus> {
     if s.is_index_deleted() {
         return Some(FileStatus::Deleted);
     }
-    if s.is_index_renamed() {
-        return Some(FileStatus::Renamed);
-    }
     if s.is_index_typechange() {
         return Some(FileStatus::Typechange);
     }
     if s.is_wt_new() {
         return Some(FileStatus::Untracked);
     }
+    if s.is_wt_renamed() {
+        return Some(FileStatus::Renamed);
+    }
     if s.is_wt_modified() {
         return Some(FileStatus::Modified);
     }
     if s.is_wt_deleted() {
         return Some(FileStatus::Deleted);
-    }
-    if s.is_wt_renamed() {
-        return Some(FileStatus::Renamed);
     }
     if s.is_wt_typechange() {
         return Some(FileStatus::Typechange);
