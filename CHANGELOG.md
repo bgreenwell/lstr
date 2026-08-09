@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed HTML file links containing spaces, `#`, `%`, and other URL-special characters
+- Fixed `--reverse` changing directory and dotfile grouping instead of only reversing entries within each group
+- Fixed `--du --dirs-only` excluding file contents from displayed directory sizes
+- Fixed renamed files not receiving the correct git-status marker
+- Fixed TUI search moving the selection to a different entry when earlier entries were filtered out
+
 ## [0.4.0] - 2026-07-13
 
 ### Added
