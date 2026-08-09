@@ -3,6 +3,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/bgreenwell/lstr/ci.yml?style=for-the-badge)](https://github.com/bgreenwell/lstr/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/lstr.svg?style=for-the-badge&color=%234E9A06)](https://crates.io/crates/lstr)
 [![Downloads](https://img.shields.io/crates/d/lstr?style=for-the-badge&color=%234E9A06)](https://crates.io/crates/lstr)
+[![Built With Ratatui](https://img.shields.io/badge/Built_With_Ratatui-000?logo=ratatui&logoColor=fff)](https://ratatui.rs/)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-%232196F3.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-%23D34516.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
