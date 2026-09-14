@@ -1,12 +1,13 @@
 //! Implements the classic, non-interactive directory tree view.
 
 use crate::app::ViewArgs;
+use crate::entry::{self, TreeEntry};
 use crate::git;
 use crate::icons;
 use crate::sort;
 use crate::utils;
 use colored::{control, Colorize};
-use ignore::{self, WalkBuilder};
+use ignore::WalkBuilder;
 use lscolors::LsColors;
 use std::fs;
 use std::io::{self, Write};
@@ -75,32 +76,50 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
         .as_ref()
         .and_then(|s| canonical_root.strip_prefix(&s.root).ok().map(|p| p.to_path_buf()));
 
-    let mut builder = WalkBuilder::new(&args.common.path);
-    utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
-    if let Some(level) = args.level {
-        builder.max_depth(Some(level));
-    }
-
     let mut dir_count = 0;
     let mut file_count = 0;
 
     // Collect all entries first, then sort them
-    let mut entries: Vec<_> = builder
-        .build()
-        .filter_map(|result| match result {
-            Ok(entry) => {
-                if entry.depth() == 0 {
-                    None // Skip the root directory
-                } else {
-                    Some(entry)
+    let mut entries: Vec<TreeEntry> = if let Some(fromfile) = &args.fromfile {
+        if fromfile.as_os_str() == "-" {
+            entry::parse_fromfile(
+                io::stdin().lock(),
+                &args.common.path,
+                args.common.all,
+                args.level,
+            )?
+        } else {
+            let file = fs::File::open(fromfile)?;
+            entry::parse_fromfile(
+                io::BufReader::new(file),
+                &args.common.path,
+                args.common.all,
+                args.level,
+            )?
+        }
+    } else {
+        let mut builder = WalkBuilder::new(&args.common.path);
+        utils::configure_ignore_filters(&mut builder, args.common.all, args.common.gitignore);
+        if let Some(level) = args.level {
+            builder.max_depth(Some(level));
+        }
+        builder
+            .build()
+            .filter_map(|result| match result {
+                Ok(entry) => {
+                    if entry.depth() == 0 {
+                        None // Skip the root directory
+                    } else {
+                        Some(TreeEntry::Walked(entry))
+                    }
                 }
-            }
-            Err(err) => {
-                eprintln!("lstr: ERROR: {err}");
-                None
-            }
-        })
-        .collect();
+                Err(err) => {
+                    eprintln!("lstr: ERROR: {err}");
+                    None
+                }
+            })
+            .collect()
+    };
 
     // Apply tree-aware sorting (preserves parent-child relationships)
     let sort_options = args.common.to_sort_options();
@@ -116,14 +135,14 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
     // Filter before computing tree connectors so that skipped entries do
     // not count as siblings of the entries that are actually printed.
     if args.dirs_only {
-        entries.retain(|entry| entry.file_type().is_some_and(|ft| ft.is_dir()));
+        entries.retain(|entry| entry.is_dir());
     }
 
     // The summary counts reflect the whole walked tree, including entries
     // hidden by --file-depth / --max-items (they are represented by the
     // "[+N ...]" markers).
     for entry in &entries {
-        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+        if entry.is_dir() {
             dir_count += 1;
         } else {
             file_count += 1;
@@ -196,7 +215,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
                 continue;
             }
         };
-        let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+        let is_dir = entry.is_dir();
 
         let git_status_str = if let (Some(cache), Some(base)) =
             (status_cache, root_in_repo.as_ref())
@@ -224,8 +243,7 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        let metadata =
-            if size_enabled || args.common.permissions { entry.metadata().ok() } else { None };
+        let metadata = if size_enabled || args.common.permissions { entry.metadata() } else { None };
         let permissions_str = if args.common.permissions {
             let perms = metadata
                 .as_ref()
@@ -331,10 +349,10 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
 /// entry's parent index, then a reverse pass rolls sizes up, so the whole
 /// computation is O(n) with one `stat` per entry.
 fn compute_cumulative_sizes(
-    entries: &[ignore::DirEntry],
+    entries: &[TreeEntry],
 ) -> (std::collections::HashMap<std::path::PathBuf, u64>, u64) {
     let mut sizes: Vec<u64> =
-        entries.iter().map(|e| e.metadata().ok().map(|m| m.len()).unwrap_or(0)).collect();
+        entries.iter().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).collect();
 
     let mut parent_index: Vec<Option<usize>> = vec![None; entries.len()];
     let mut ancestors: Vec<usize> = Vec::new(); // ancestors[k] is at depth k + 1
@@ -405,10 +423,11 @@ fn render_json(
                 }
                 TreeNode::Entry(entry) => {
                     *index += 1;
-                    let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                    let is_dir = entry.is_dir();
                     let type_str = if is_dir {
                         "directory"
-                    } else if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
+                    } else if matches!(entry, TreeEntry::Walked(w) if w.file_type().is_some_and(|ft| ft.is_symlink()))
+                    {
                         "symlink"
                     } else {
                         "file"
@@ -422,11 +441,8 @@ fn render_json(
                     object.insert("type".into(), type_str.into());
 
                     let size_enabled = args.common.size || args.du;
-                    let metadata = if size_enabled || args.common.permissions {
-                        entry.metadata().ok()
-                    } else {
-                        None
-                    };
+                    let metadata =
+                        if size_enabled || args.common.permissions { entry.metadata() } else { None };
                     if size_enabled && is_dir {
                         // Directories only carry a size under --du.
                         if let Some(size) = du_map.and_then(|map| map.get(entry.path())) {
@@ -555,7 +571,7 @@ fn render_html(
     use std::fmt::Write as _;
 
     fn entry_meta(
-        entry: &ignore::DirEntry,
+        entry: &TreeEntry,
         is_dir: bool,
         args: &ViewArgs,
         status_cache: Option<&git::StatusCache>,
@@ -564,7 +580,7 @@ fn render_html(
     ) -> String {
         let size_enabled = args.common.size || args.du;
         let metadata =
-            if size_enabled || args.common.permissions { entry.metadata().ok() } else { None };
+            if size_enabled || args.common.permissions { entry.metadata() } else { None };
 
         let mut parts = Vec::new();
         if args.common.permissions {
@@ -621,7 +637,7 @@ fn render_html(
                 }
                 TreeNode::Entry(entry) => {
                     *index += 1;
-                    let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                    let is_dir = entry.is_dir();
                     let name = html_escape(&entry.file_name().to_string_lossy());
                     let meta = entry_meta(entry, is_dir, args, status_cache, root_in_repo, du_map);
 
@@ -684,7 +700,7 @@ fn render_html(
 /// A renderable line in the tree: a real entry, or a per-directory summary
 /// of entries hidden by `--file-depth` / `--max-items`.
 enum TreeNode {
-    Entry(ignore::DirEntry),
+    Entry(TreeEntry),
     Summary { depth: usize, hidden_files: usize, hidden_items: usize },
 }
 
@@ -701,7 +717,7 @@ impl TreeNode {
 /// directory whose children were suppressed gets one trailing summary node.
 /// Entries suppressed by `--max-items` take their whole subtree with them.
 fn apply_display_limits(
-    entries: Vec<ignore::DirEntry>,
+    entries: Vec<TreeEntry>,
     file_depth: Option<usize>,
     max_items: Option<usize>,
 ) -> Vec<TreeNode> {
@@ -710,7 +726,7 @@ fn apply_display_limits(
     }
 
     use std::collections::HashMap;
-    let mut children_map: HashMap<std::path::PathBuf, Vec<ignore::DirEntry>> = HashMap::new();
+    let mut children_map: HashMap<std::path::PathBuf, Vec<TreeEntry>> = HashMap::new();
     let mut roots = Vec::new();
     for entry in entries {
         if entry.depth() == 1 {
@@ -721,8 +737,8 @@ fn apply_display_limits(
     }
 
     fn emit(
-        children: Vec<ignore::DirEntry>,
-        children_map: &mut HashMap<std::path::PathBuf, Vec<ignore::DirEntry>>,
+        children: Vec<TreeEntry>,
+        children_map: &mut HashMap<std::path::PathBuf, Vec<TreeEntry>>,
         file_depth: Option<usize>,
         max_items: Option<usize>,
         out: &mut Vec<TreeNode>,
@@ -732,7 +748,7 @@ fn apply_display_limits(
         let mut hidden_files = 0usize;
         let mut hidden_items = 0usize;
         for child in children {
-            let is_dir = child.file_type().is_some_and(|ft| ft.is_dir());
+            let is_dir = child.is_dir();
             if !is_dir && file_depth.is_some_and(|limit| child.depth() > limit) {
                 hidden_files += 1;
                 continue;

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--fromfile <FILE>` builds the tree from a path listing instead of walking the filesystem, like `tree --fromfile`; use `-` for stdin (classic mode only, compatible with `--git-status`)
+
 ### Fixed
 
 - Fixed HTML file links containing spaces, `#`, `%`, and other URL-special characters
