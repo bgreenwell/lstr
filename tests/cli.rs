@@ -895,9 +895,10 @@ fn test_fromfile_basic_listing() -> Result<(), Box<dyn std::error::Error>> {
         .stdout(predicate::str::contains("a"))
         .stdout(predicate::str::contains("b.txt"))
         .stdout(predicate::str::contains("c.txt"))
-        .stdout(predicate::str::contains("2 directories, 1 file").or(predicate::str::contains(
-            "1 directories, 2 files",
-        )));
+        .stdout(
+            predicate::str::contains("2 directories, 1 file")
+                .or(predicate::str::contains("1 directories, 2 files")),
+        );
     Ok(())
 }
 
@@ -954,7 +955,8 @@ fn test_fromfile_respects_all_and_level_flags() -> Result<(), Box<dyn std::error
 }
 
 #[test]
-fn test_fromfile_size_and_permissions_use_real_filesystem() -> Result<(), Box<dyn std::error::Error>> {
+fn test_fromfile_size_and_permissions_use_real_filesystem() -> Result<(), Box<dyn std::error::Error>>
+{
     let temp_dir = tempdir()?;
     fs::write(temp_dir.path().join("real.txt"), vec![b'x'; 42])?;
     let listing_path = temp_dir.path().join("listing.txt");

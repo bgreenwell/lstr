@@ -243,7 +243,8 @@ pub fn run(args: &ViewArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
             String::new()
         };
 
-        let metadata = if size_enabled || args.common.permissions { entry.metadata() } else { None };
+        let metadata =
+            if size_enabled || args.common.permissions { entry.metadata() } else { None };
         let permissions_str = if args.common.permissions {
             let perms = metadata
                 .as_ref()
@@ -441,8 +442,11 @@ fn render_json(
                     object.insert("type".into(), type_str.into());
 
                     let size_enabled = args.common.size || args.du;
-                    let metadata =
-                        if size_enabled || args.common.permissions { entry.metadata() } else { None };
+                    let metadata = if size_enabled || args.common.permissions {
+                        entry.metadata()
+                    } else {
+                        None
+                    };
                     if size_enabled && is_dir {
                         // Directories only carry a size under --du.
                         if let Some(size) = du_map.and_then(|map| map.get(entry.path())) {
