@@ -27,9 +27,10 @@ into `main` and tag `vX.Y.Z` there (see `RELEASE_CHECKLIST.md`).
 | :--------- | :------------- |
 | `main.rs`  | Entry point; dispatches to `view::run` or `tui::run`. |
 | `app.rs`   | clap CLI. Shared flags live in `CommonArgs`, flattened into `ViewArgs` and `InteractiveArgs` — declare a shared flag once, there. |
-| `view.rs`  | Classic mode. Pipeline: walk → filter (`--dirs-only`) → sort → count → `--du` sizes → display limits (`TreeNode` list) → render (text, JSON, or HTML). |
-| `tui.rs`   | Interactive mode: `AppState`, `handle_key`/`handle_mouse`, terminal setup/teardown, editor suspend/resume. |
-| `sort.rs`  | `sort_entries_hierarchically` (DFS-order preserving) built on decorate-sort-undecorate `SortKey`s. |
+| `view.rs`  | Classic mode. Pipeline: walk (or `--fromfile` listing) → filter (`--dirs-only`) → sort → count → `--du` sizes → display limits (`TreeNode` list) → render (text, JSON, or HTML). |
+| `tui.rs`   | Interactive mode: `AppState`, `handle_key`/`handle_mouse`, terminal setup/teardown, editor suspend/resume. Always walks the real filesystem — `--fromfile` is classic-mode only. |
+| `entry.rs` | `TreeEntry` (`Walked`/`Listed`) unifies real `ignore::DirEntry` walk results with synthetic `--fromfile` listings so `view.rs` can treat them identically; `parse_fromfile` builds `Listed` entries from a path list. |
+| `sort.rs`  | `sort_entries_hierarchically` (DFS-order preserving) built on decorate-sort-undecorate `SortKey`s, generic over the `SortableEntry` trait (`ignore::DirEntry` and `entry::TreeEntry`). |
 | `git.rs`   | git2 status cache keyed by repo-relative path; file statuses propagate to ancestor directories (most severe wins). |
 | `utils.rs` | Shared helpers: `configure_ignore_filters`, `permission_string`, `format_size`, `display_path` (Windows verbatim paths). |
 | `color.rs` | All conversions between the lscolors, colored, and ratatui color models — never map colors inline elsewhere. |

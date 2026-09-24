@@ -881,3 +881,161 @@ fn test_du_dirs_only_counts_hidden_file_contents() -> Result<(), Box<dyn std::er
     assert!(json["report"]["total_size"].as_u64().expect("total present") >= 100);
     Ok(())
 }
+
+#[test]
+fn test_fromfile_basic_listing() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let listing_path = temp_dir.path().join("listing.txt");
+    fs::write(&listing_path, "a/b.txt\nc.txt\n")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("a"))
+        .stdout(predicate::str::contains("b.txt"))
+        .stdout(predicate::str::contains("c.txt"))
+        .stdout(
+            predicate::str::contains("2 directories, 1 file")
+                .or(predicate::str::contains("1 directories, 2 files")),
+        );
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_stdin() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+
+    let mut cmd = assert_cmd::Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg("-").arg(temp_dir.path()).write_stdin("dir1/file.txt\n");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("dir1"))
+        .stdout(predicate::str::contains("file.txt"));
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_conflicts_with_gitignore() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let listing_path = temp_dir.path().join("listing.txt");
+    fs::write(&listing_path, "a.txt\n")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg("--gitignore").arg(temp_dir.path());
+    cmd.assert().failure().stderr(predicate::str::contains("cannot be used with"));
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_respects_all_and_level_flags() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let listing_path = temp_dir.path().join("listing.txt");
+    fs::write(&listing_path, ".hidden/secret.txt\nvisible/deep/leaf.txt\n")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(".hidden").not())
+        .stdout(predicate::str::contains("secret.txt").not())
+        .stdout(predicate::str::contains("visible"))
+        .stdout(predicate::str::contains("deep"))
+        .stdout(predicate::str::contains("leaf.txt"));
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg("-a").arg("-L").arg("1").arg(temp_dir.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(".hidden"))
+        .stdout(predicate::str::contains("secret.txt").not())
+        .stdout(predicate::str::contains("visible"))
+        .stdout(predicate::str::contains("deep").not());
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_size_and_permissions_use_real_filesystem() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp_dir = tempdir()?;
+    fs::write(temp_dir.path().join("real.txt"), vec![b'x'; 42])?;
+    let listing_path = temp_dir.path().join("listing.txt");
+    fs::write(&listing_path, "real.txt\nmissing.txt\n")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg("-s").arg("-p").arg(temp_dir.path());
+    let output = cmd.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let real_line = stdout.lines().find(|l| l.contains("real.txt")).expect("real.txt listed");
+    assert!(real_line.contains("42"), "expected real size in: {real_line}");
+
+    let missing_line =
+        stdout.lines().find(|l| l.contains("missing.txt")).expect("missing.txt listed");
+    assert!(
+        missing_line.contains("----------"),
+        "missing entry should fall back to blank permissions: {missing_line}"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_compatible_with_git_status() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    let temp_path = temp_dir.path();
+
+    Command::new("git").arg("init").current_dir(temp_path).output()?;
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(temp_path)
+        .output()?;
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(temp_path)
+        .output()?;
+
+    fs::write(temp_path.join("committed.txt"), "initial content")?;
+    Command::new("git").args(["add", "committed.txt"]).current_dir(temp_path).output()?;
+    Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(temp_path).output()?;
+    fs::write(temp_path.join("committed.txt"), "modified content")?;
+
+    let listing_path = temp_path.join("listing.txt");
+    fs::write(&listing_path, "committed.txt\ngone.txt\n")?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg("-G").arg(temp_path);
+    cmd.assert().success().stdout(predicate::str::is_match(r"M\s+.*committed\.txt").unwrap());
+    Ok(())
+}
+
+#[test]
+fn test_fromfile_json_symlink_reports_file_not_symlink() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempdir()?;
+    fs::File::create(temp_dir.path().join("target.txt"))?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("target.txt", temp_dir.path().join("link_to_target"))?;
+    #[cfg(unix)]
+    let listing_contents = "target.txt\nlink_to_target\n";
+    #[cfg(not(unix))]
+    let listing_contents = "target.txt\n";
+
+    let listing_path = temp_dir.path().join("listing.txt");
+    fs::write(&listing_path, listing_contents)?;
+
+    let mut cmd = Command::cargo_bin("lstr")?;
+    cmd.arg("--fromfile").arg(&listing_path).arg("--output").arg("json").arg(temp_dir.path());
+    let json: serde_json::Value = serde_json::from_slice(&cmd.output()?.stdout)?;
+    let contents = json["contents"].as_array().expect("root contents");
+
+    #[cfg(unix)]
+    {
+        let link = contents
+            .iter()
+            .find(|e| e["name"] == "link_to_target")
+            .expect("link_to_target in json");
+        assert_eq!(link["type"], "file");
+    }
+    let target = contents.iter().find(|e| e["name"] == "target.txt").expect("target in json");
+    assert_eq!(target["type"], "file");
+    Ok(())
+}

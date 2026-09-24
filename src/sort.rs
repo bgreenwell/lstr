@@ -8,6 +8,46 @@ use ignore::DirEntry;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fmt;
+use std::path::Path;
+use std::time::SystemTime;
+
+/// Anything that can be sorted as a directory tree entry, whether it comes
+/// from a live filesystem walk (`ignore::DirEntry`) or a synthetic listing
+/// (`crate::entry::TreeEntry`).
+pub trait SortableEntry {
+    fn path(&self) -> &Path;
+    fn depth(&self) -> usize;
+    fn file_name(&self) -> &OsStr;
+    fn is_dir(&self) -> bool;
+    fn size(&self) -> u64;
+    fn modified(&self) -> Option<SystemTime>;
+}
+
+impl SortableEntry for DirEntry {
+    fn path(&self) -> &Path {
+        DirEntry::path(self)
+    }
+
+    fn depth(&self) -> usize {
+        DirEntry::depth(self)
+    }
+
+    fn file_name(&self) -> &OsStr {
+        DirEntry::file_name(self)
+    }
+
+    fn is_dir(&self) -> bool {
+        self.file_type().is_some_and(|ft| ft.is_dir())
+    }
+
+    fn size(&self) -> u64 {
+        get_entry_size(self)
+    }
+
+    fn modified(&self) -> Option<SystemTime> {
+        self.metadata().ok().and_then(|m| m.modified().ok())
+    }
+}
 
 /// Defines the available sorting strategies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
@@ -71,10 +111,10 @@ pub struct SortOptions {
 /// };
 /// sort_entries(&mut entries, &options);
 /// ```
-pub fn sort_entries(entries: &mut Vec<DirEntry>, options: &SortOptions) {
+pub fn sort_entries<E: SortableEntry>(entries: &mut Vec<E>, options: &SortOptions) {
     // Decorate-sort-undecorate: precompute each entry's sort key once so
     // comparisons avoid repeated metadata syscalls and string allocations.
-    let mut decorated: Vec<(SortKey, DirEntry)> =
+    let mut decorated: Vec<(SortKey, E)> =
         std::mem::take(entries).into_iter().map(|e| (SortKey::new(&e, options), e)).collect();
     decorated.sort_by(|(key_a, a), (key_b, b)| compare_keyed(key_a, a, key_b, b, options));
     entries.extend(decorated.into_iter().map(|(_, entry)| entry));
@@ -94,15 +134,12 @@ struct SortKey {
 }
 
 impl SortKey {
-    fn new(entry: &DirEntry, options: &SortOptions) -> Self {
-        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+    fn new<E: SortableEntry>(entry: &E, options: &SortOptions) -> Self {
+        let is_dir = entry.is_dir();
         let is_dotfile = options.dotfiles_first && is_dotfile(entry);
-        let size = if options.sort_type == SortType::Size { get_entry_size(entry) } else { 0 };
-        let modified = if options.sort_type == SortType::Modified {
-            entry.metadata().ok().and_then(|m| m.modified().ok())
-        } else {
-            None
-        };
+        let size = if options.sort_type == SortType::Size { entry.size() } else { 0 };
+        let modified =
+            if options.sort_type == SortType::Modified { entry.modified() } else { None };
         let name_lower = if !options.natural_sort && !options.case_sensitive {
             entry.file_name().to_string_lossy().to_lowercase()
         } else {
@@ -127,7 +164,7 @@ impl SortKey {
 /// This builds an explicit tree structure and then reconstructs the entries
 /// in depth-first order with proper sibling sorting within each parent directory.
 /// Use this instead of sort_entries() when you need to preserve parent-child relationships.
-pub fn sort_entries_hierarchically(entries: &mut Vec<DirEntry>, options: &SortOptions) {
+pub fn sort_entries_hierarchically<E: SortableEntry>(entries: &mut Vec<E>, options: &SortOptions) {
     use std::collections::HashMap;
 
     if entries.is_empty() {
@@ -137,8 +174,8 @@ pub fn sort_entries_hierarchically(entries: &mut Vec<DirEntry>, options: &SortOp
     let total = entries.len();
 
     // Move entries into per-parent buckets instead of cloning them.
-    let mut children_map: HashMap<std::path::PathBuf, Vec<DirEntry>> = HashMap::new();
-    let mut root_entries: Vec<DirEntry> = Vec::new();
+    let mut children_map: HashMap<std::path::PathBuf, Vec<E>> = HashMap::new();
+    let mut root_entries: Vec<E> = Vec::new();
     for entry in entries.drain(..) {
         // Root entries are at depth 1, since depth 0 (the walk root) is
         // skipped by the callers.
@@ -156,10 +193,10 @@ pub fn sort_entries_hierarchically(entries: &mut Vec<DirEntry>, options: &SortOp
     sort_entries(&mut root_entries, options);
 
     // Reassemble in depth-first order, moving entries back out of the map.
-    fn collect_tree_entries(
-        entry: DirEntry,
-        children_map: &mut HashMap<std::path::PathBuf, Vec<DirEntry>>,
-        result: &mut Vec<DirEntry>,
+    fn collect_tree_entries<E: SortableEntry>(
+        entry: E,
+        children_map: &mut HashMap<std::path::PathBuf, Vec<E>>,
+        result: &mut Vec<E>,
     ) {
         let children = children_map.remove(entry.path());
         result.push(entry);
@@ -179,11 +216,11 @@ pub fn sort_entries_hierarchically(entries: &mut Vec<DirEntry>, options: &SortOp
 }
 
 /// Compares two directory entries using their precomputed sort keys.
-fn compare_keyed(
+fn compare_keyed<E: SortableEntry>(
     key_a: &SortKey,
-    a: &DirEntry,
+    a: &E,
     key_b: &SortKey,
-    b: &DirEntry,
+    b: &E,
     options: &SortOptions,
 ) -> Ordering {
     let (a_is_dir, a_is_dotfile) = (key_a.is_dir, key_a.is_dotfile);
@@ -245,11 +282,11 @@ fn compare_keyed(
 }
 
 /// Compares entries by name, handling case sensitivity and natural sorting.
-fn compare_by_name_keyed(
+fn compare_by_name_keyed<E: SortableEntry>(
     key_a: &SortKey,
-    a: &DirEntry,
+    a: &E,
     key_b: &SortKey,
-    b: &DirEntry,
+    b: &E,
     options: &SortOptions,
 ) -> Ordering {
     if options.natural_sort {
@@ -323,7 +360,7 @@ fn char_sort_priority(c: char) -> u8 {
 }
 
 /// Checks if a directory entry is a dotfile/dotfolder (starts with '.').
-fn is_dotfile(entry: &DirEntry) -> bool {
+fn is_dotfile<E: SortableEntry>(entry: &E) -> bool {
     entry.file_name().to_string_lossy().starts_with('.')
 }
 

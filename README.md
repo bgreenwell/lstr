@@ -100,6 +100,7 @@ Note that `PATH` defaults to the current directory (`.`) if not specified.
 | `--max-items <N>`      | Show at most N entries per directory, summarized as `[+N more]` (classic mode only). |
 | `--du`                 | Show directories with the cumulative size of their contents, like `tree --du`; implies `-s` (classic mode only). |
 | `--output <FORMAT>`    | Output format: `text` (default), `json`, or `html` (classic mode only).     |
+| `--fromfile <FILE>`    | Read the tree structure from a path listing instead of walking the filesystem, like `tree --fromfile`; use `-` for stdin. Incompatible with `--gitignore` (classic mode only). |
 | `-p`, `--permissions`  | Display file permissions (Unix-like systems only).                          |
 | `-s`, `--size`         | Display the size of files.                                                  |
 | `--sort <TYPE>`        | Sort entries by the specified criteria (`name`, `size`, `modified`, `extension`). |

@@ -121,6 +121,14 @@ pub struct ViewArgs {
     /// Output format for the tree.
     #[arg(long, value_name = "FORMAT", default_value_t = OutputFormat::Text)]
     pub output: OutputFormat,
+    /// Read the directory structure from a file instead of walking the
+    /// filesystem, like `tree --fromfile` (use "-" for stdin). Each line is
+    /// a path relative to PATH; a line ending in "/" is an explicit empty
+    /// directory, and other lines' ancestor directories are inferred
+    /// automatically. Incompatible with --gitignore, since there is no
+    /// live walk to filter.
+    #[arg(long, value_name = "FILE", conflicts_with = "gitignore")]
+    pub fromfile: Option<PathBuf>,
 }
 
 /// Defines the available output formats for the classic view.
