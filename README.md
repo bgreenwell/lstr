@@ -167,6 +167,7 @@ Launch the TUI with `lstr interactive [OPTIONS] [PATH]`.
 | `→` / `l` | Same as `Enter`. |
 | `Enter` | **Context-aware action:**<br>- If on a file: Open it in the configured editor (`--editor`, `$VISUAL`, or `$EDITOR`), then return to the tree.<br>- If on a directory: Toggle expand/collapse. |
 | `/` | Search: filter entries by name as you type (substring, or a glob like `*.rs` / `test_?.py` if the query contains `*` or `?`). `Esc` exits search. |
+| `?` | Recursive fuzzy search (fzf-style): type characters in order (e.g. `srcmn` finds `src/main.rs`), or several space-separated terms in any order (e.g. `cmd report` finds `cmd/report.rs`; every term must match) to match against the path of every file in the tree, including inside collapsed directories. Results are ranked best-first; matching is case-insensitive unless the query contains an uppercase letter. `Enter` on a match leaves search and navigates to it in the tree (expanding its parent directories); press `Enter` again to open it. `Esc` exits search. |
 | `q` / `Esc` | Quit the application normally. |
 | `Ctrl`+`s` | **Shell integration:** Quits and prints the selected path to stdout. |
 | Mouse | Scroll wheel moves the selection; click selects a row; clicking the selected entry activates it (open file / toggle directory). Hold `Shift` for normal terminal text selection. |

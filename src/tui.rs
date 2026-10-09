@@ -57,8 +57,11 @@ struct FileEntry {
 enum SearchMode {
     /// No search active, showing all entries
     None,
-    /// Search mode activated with '/' key
+    /// Search mode activated with '/' key (filters the visible entries)
     Search,
+    /// Recursive search activated with '?' key (searches every scanned
+    /// entry, including inside collapsed directories)
+    Recursive,
 }
 
 struct AppState {
@@ -73,6 +76,8 @@ struct AppState {
     original_visible_entries: Vec<FileEntry>,
     /// Selection when search started, used if the query has no matches.
     search_selection_path: Option<PathBuf>,
+    /// Root of the scanned tree, used to show match locations in recursive search.
+    root_path: PathBuf,
 }
 
 impl AppState {
@@ -99,6 +104,7 @@ impl AppState {
             search_query: String::new(),
             original_visible_entries: Vec::new(),
             search_selection_path: None,
+            root_path: root_path.to_path_buf(),
         };
         app_state.regenerate_visible_entries();
         if !app_state.visible_entries.is_empty() {
@@ -268,30 +274,55 @@ impl AppState {
 
     /// Enter search mode (activated by '/' key)
     fn enter_search_mode(&mut self) {
+        self.begin_search(SearchMode::Search);
+    }
+
+    /// Enter recursive search mode (activated by '?' key)
+    fn enter_recursive_search_mode(&mut self) {
+        self.begin_search(SearchMode::Recursive);
+    }
+
+    fn begin_search(&mut self, mode: SearchMode) {
         if self.search_mode == SearchMode::None {
             self.original_visible_entries = self.visible_entries.clone();
             self.search_selection_path = self.get_selected_entry().map(|entry| entry.path.clone());
         }
-        self.search_mode = SearchMode::Search;
+        self.search_mode = mode;
         self.search_query.clear();
+        // Restore the unfiltered list so a previous query doesn't linger.
+        self.visible_entries = self.original_visible_entries.clone();
+    }
+
+    /// Leaves search mode and navigates to `path`: expands its ancestor
+    /// directories and selects it in the regular tree.
+    fn reveal_path(&mut self, path: &Path) {
+        self.exit_search_mode();
+        for entry in &mut self.master_entries {
+            if entry.is_dir && path.starts_with(&entry.path) && entry.path != path {
+                entry.is_expanded = true;
+            }
+        }
+        self.regenerate_visible_entries();
+        self.select_path(path);
     }
 
     /// Exit search/filter mode and restore original view
     fn exit_search_mode(&mut self) {
         if self.search_mode != SearchMode::None {
-            let selected_path = self
-                .get_selected_entry()
-                .map(|entry| entry.path.clone())
-                .or_else(|| self.search_selection_path.clone());
+            let selected_path = self.get_selected_entry().map(|entry| entry.path.clone());
+            let original_path = self.search_selection_path.take();
             self.visible_entries = std::mem::take(&mut self.original_visible_entries);
             self.search_mode = SearchMode::None;
             self.search_query.clear();
-            self.search_selection_path = None;
 
             // Keep the entry that was highlighted in the filtered list
-            // selected in the restored list.
-            let selection = selected_path
-                .and_then(|path| self.visible_entries.iter().position(|e| e.path == path))
+            // selected in the restored list, falling back to the selection
+            // from before the search started.
+            let find = |path: Option<PathBuf>| {
+                path.and_then(|p| self.visible_entries.iter().position(|e| e.path == p))
+            };
+            let selection = find(selected_path)
+                .or_else(|| find(original_path))
                 .or(if self.visible_entries.is_empty() { None } else { Some(0) });
             self.list_state.select(selection);
         }
@@ -338,6 +369,30 @@ impl AppState {
             } else {
                 None
             };
+            if self.search_mode == SearchMode::Recursive {
+                // Fuzzy-match against the root-relative path, best match first.
+                let mut scored: Vec<(i64, usize, &FileEntry)> = self
+                    .master_entries
+                    .iter()
+                    .filter_map(|entry| {
+                        let rel = entry.path.strip_prefix(&self.root_path).unwrap_or(&entry.path);
+                        let text = rel.to_string_lossy();
+                        let name_start =
+                            text.rfind(['/', '\\']).map_or(0, |i| text[..i + 1].chars().count());
+                        multi_term_score(query, &text, name_start)
+                            .map(|score| (score, text.chars().count(), entry))
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+                self.visible_entries = scored.into_iter().map(|(_, _, e)| e.clone()).collect();
+                // The ranking changes with every keystroke, so follow the best match.
+                self.list_state.select(if self.visible_entries.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+                return;
+            }
             self.visible_entries = self
                 .original_visible_entries
                 .iter()
@@ -373,6 +428,71 @@ impl AppState {
             .ok()
             .map(|g| g.compile_matcher())
     }
+}
+
+/// Scores `text` against a query made of whitespace-separated terms. Every
+/// term must fuzzy-match somewhere in `text` (in any order, like fzf), and
+/// the term scores are summed. An empty query matches everything.
+fn multi_term_score(query: &str, text: &str, name_start: usize) -> Option<i64> {
+    query.split_whitespace().map(|term| fuzzy_score(term, text, name_start)).sum::<Option<i64>>()
+}
+
+/// Scores `text` against `query` as a fuzzy subsequence match, fzf-style:
+/// every query character must appear in order, with bonuses for consecutive
+/// runs, word boundaries, and matches inside the filename (from char index
+/// `name_start`). Case-insensitive unless the query contains an uppercase
+/// letter. Returns `None` when the query does not match.
+fn fuzzy_score(query: &str, text: &str, name_start: usize) -> Option<i64> {
+    const INVALID: i64 = i64::MIN / 2;
+    let q: Vec<char> = query.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    if q.is_empty() {
+        return Some(0);
+    }
+    let smart_case = q.iter().any(|c| c.is_uppercase());
+    let same = |a: char, b: char| {
+        if smart_case {
+            a == b
+        } else {
+            a.to_lowercase().eq(b.to_lowercase())
+        }
+    };
+
+    // prev[j]: best score with the previous query char matched at t[j].
+    let mut prev = vec![INVALID; t.len()];
+    for (i, &qc) in q.iter().enumerate() {
+        let mut cur = vec![INVALID; t.len()];
+        // Best of prev[k] - gap penalty over all k before the current j.
+        let mut run = INVALID;
+        for j in 0..t.len() {
+            if j > 0 {
+                run = (run - 1).max(prev[j - 1]);
+            }
+            if !same(qc, t[j]) {
+                continue;
+            }
+            let base = if i == 0 {
+                0
+            } else {
+                let consecutive =
+                    if j > 0 && prev[j - 1] > INVALID / 2 { prev[j - 1] + 8 } else { INVALID };
+                run.max(consecutive)
+            };
+            if base <= INVALID / 2 {
+                continue;
+            }
+            let boundary = match j.checked_sub(1).map(|k| t[k]) {
+                None => 10,
+                Some('/' | '\\' | '_' | '-' | '.' | ' ') => 10,
+                Some(p) if p.is_lowercase() && t[j].is_uppercase() => 8,
+                _ => 0,
+            };
+            let in_name = if j >= name_start { 4 } else { 0 };
+            cur[j] = base + 16 + boundary + in_name;
+        }
+        prev = cur;
+    }
+    prev.into_iter().filter(|&s| s > INVALID / 2).max()
 }
 
 pub fn run(args: &InteractiveArgs, ls_colors: &LsColors) -> anyhow::Result<()> {
@@ -486,6 +606,7 @@ fn handle_key(app_state: &mut AppState, key: KeyEvent) -> Option<PostExitAction>
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return Some(PostExitAction::None),
         KeyCode::Char('/') => app_state.enter_search_mode(),
+        KeyCode::Char('?') => app_state.enter_recursive_search_mode(),
         KeyCode::Down | KeyCode::Char('j') => app_state.next(),
         KeyCode::Up | KeyCode::Char('k') => app_state.previous(),
         KeyCode::Left | KeyCode::Char('h') => app_state.close_encompassing_directory(),
@@ -543,6 +664,12 @@ fn handle_mouse(
 fn handle_enter(app_state: &mut AppState) -> Option<PostExitAction> {
     let entry = app_state.get_selected_entry()?;
     let (path, is_dir) = (entry.path.clone(), entry.is_dir);
+    // A recursive search match is revealed in the tree rather than opened,
+    // since the match may be buried inside collapsed directories.
+    if app_state.search_mode == SearchMode::Recursive {
+        app_state.reveal_path(&path);
+        return None;
+    }
     if is_dir {
         // Expanding changes which entries exist, so leave search mode
         // (restoring the full list) before toggling.
@@ -589,7 +716,13 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
                     Style::default().fg(Color::DarkGray),
                 ));
             }
-            let indent_str = "    ".repeat(entry.depth.saturating_sub(1));
+            let recursive = app_state.search_mode == SearchMode::Recursive;
+            // Recursive matches are shown flat, with their location appended.
+            let indent_str = if recursive {
+                String::new()
+            } else {
+                "    ".repeat(entry.depth.saturating_sub(1))
+            };
             spans.push(Span::raw(indent_str));
             let branch_str = if entry.is_dir {
                 if entry.is_expanded {
@@ -614,6 +747,19 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
             let ratatui_style = color::ls_to_ratatui_style(lscolors_style);
             let name_span = Span::styled(name.to_string(), ratatui_style);
             spans.push(name_span);
+            if recursive {
+                if let Some(parent) = entry
+                    .path
+                    .parent()
+                    .and_then(|p| p.strip_prefix(&app_state.root_path).ok())
+                    .filter(|p| !p.as_os_str().is_empty())
+                {
+                    spans.push(Span::styled(
+                        format!("  {}", parent.display()),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                }
+            }
 
             if args.common.size && !entry.is_dir {
                 if let Some(size) = entry.size {
@@ -646,10 +792,15 @@ fn ui(f: &mut Frame, app_state: &mut AppState, args: &InteractiveArgs, ls_colors
     // Create and render status line
     let status_text = if app_state.in_search_mode() {
         let match_count = app_state.visible_entries.len();
-        format!("Search: {} ({} matches)", app_state.search_query, match_count)
+        let label = if app_state.search_mode == SearchMode::Recursive {
+            "Recursive search"
+        } else {
+            "Search"
+        };
+        format!("{label}: {} ({} matches)", app_state.search_query, match_count)
     } else {
         // Show help text when not searching
-        "Press / to search, q to quit".to_string()
+        "Press / to search, ? to search recursively, q to quit".to_string()
     };
 
     let status_paragraph = Paragraph::new(status_text).style(if app_state.in_search_mode() {
@@ -802,6 +953,7 @@ mod tests {
             search_query: String::new(),
             original_visible_entries: Vec::new(),
             search_selection_path: None,
+            root_path: PathBuf::new(),
         };
         app_state.regenerate_visible_entries();
         app_state.list_state.select(Some(0));
@@ -853,6 +1005,7 @@ mod tests {
             search_query: String::new(),
             original_visible_entries: Vec::new(),
             search_selection_path: None,
+            root_path: PathBuf::new(),
         }
     }
 
@@ -1159,5 +1312,90 @@ mod tests {
         assert_eq!(app_state.visible_entries.len(), 3);
         handle_key(&mut app_state, key(KeyCode::Right));
         assert_eq!(app_state.visible_entries.len(), 2);
+    }
+
+    #[test]
+    fn test_recursive_search_finds_entries_in_collapsed_directories() {
+        let mut app_state = setup_test_app_state();
+        assert!(!app_state.visible_entries.iter().any(|e| e.path.ends_with("main.rs")));
+        handle_key(&mut app_state, key(KeyCode::Char('?')));
+        handle_key(&mut app_state, key(KeyCode::Char('m')));
+        handle_key(&mut app_state, key(KeyCode::Char('a')));
+        assert!(app_state.in_search_mode());
+        assert!(app_state.visible_entries.iter().any(|e| e.path.ends_with("main.rs")));
+    }
+
+    #[test]
+    fn test_plain_search_does_not_find_entries_in_collapsed_directories() {
+        let mut app_state = setup_test_app_state();
+        handle_key(&mut app_state, key(KeyCode::Char('/')));
+        handle_key(&mut app_state, key(KeyCode::Char('m')));
+        handle_key(&mut app_state, key(KeyCode::Char('a')));
+        assert!(!app_state.visible_entries.iter().any(|e| e.path.ends_with("main.rs")));
+    }
+
+    #[test]
+    fn test_enter_on_recursive_match_reveals_file_in_tree() {
+        let mut app_state = setup_test_app_state();
+        for c in ['?', 'm', 'a', 'i', 'n', '.', 'r', 's'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        let action = handle_key(&mut app_state, key(KeyCode::Enter));
+        assert!(action.is_none());
+        assert!(!app_state.in_search_mode());
+        let selected = app_state.get_selected_entry().unwrap();
+        assert!(selected.path.ends_with("main.rs"));
+        assert!(app_state.master_entries.iter().any(|e| e.path.ends_with("src") && e.is_expanded));
+    }
+
+    #[test]
+    fn test_escape_from_recursive_search_restores_original_selection() {
+        let mut app_state = setup_test_app_state();
+        let original = app_state.get_selected_entry().unwrap().path.clone();
+        for c in ['?', 'm', 'a', 'i', 'n'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        handle_key(&mut app_state, key(KeyCode::Esc));
+        assert!(!app_state.in_search_mode());
+        assert_eq!(app_state.get_selected_entry().unwrap().path, original);
+    }
+
+    #[test]
+    fn test_fuzzy_score_subsequence_and_ranking() {
+        assert!(fuzzy_score("xyz", "main.rs", 0).is_none());
+        assert!(fuzzy_score("mrs", "src/main.rs", 4).is_some());
+        // Order matters.
+        assert!(fuzzy_score("sm", "ms", 0).is_none());
+        // Consecutive / boundary matches outrank scattered ones.
+        let tight = fuzzy_score("main", "src/main.rs", 4).unwrap();
+        let loose = fuzzy_score("main", "src/magic_install.rs", 4).unwrap();
+        assert!(tight > loose);
+        // Smart case: an uppercase query char is case-sensitive.
+        assert!(fuzzy_score("readme", "README.md", 0).is_some());
+        assert!(fuzzy_score("Readme", "readme.md", 0).is_none());
+    }
+
+    #[test]
+    fn test_recursive_search_is_fuzzy_and_matches_path() {
+        let mut app_state = setup_test_app_state();
+        for c in ['?', 's', 'm', 'r', 's'] {
+            handle_key(&mut app_state, key(KeyCode::Char(c)));
+        }
+        // "smrs" is a subsequence of "src/main.rs" but not of any filename alone.
+        assert_eq!(app_state.visible_entries.len(), 1);
+        assert!(app_state.visible_entries[0].path.ends_with("main.rs"));
+    }
+
+    #[test]
+    fn test_multi_term_score_requires_every_term_in_any_order() {
+        let path = "cmd/report_gen.rs";
+        assert!(multi_term_score("cmd report", path, 4).is_some());
+        assert!(multi_term_score("report cmd", path, 4).is_some());
+        assert!(multi_term_score("cmd missing", path, 4).is_none());
+        // Extra whitespace is ignored, and an all-space query matches everything.
+        assert!(multi_term_score("  cmd   report ", path, 4).is_some());
+        assert_eq!(multi_term_score("   ", path, 4), Some(0));
+        // Terms can match the directory and the filename separately.
+        assert!(multi_term_score("cmd report", "other/report.rs", 6).is_none());
     }
 }
