@@ -50,7 +50,7 @@ jobs:
           echo "Timed out waiting for release asset lstr-x86_64-pc-windows-msvc.msi" >&2
           exit 1
       - name: Install Komac
-        uses: cargo-bins/cargo-binstall@v1.20.1
+        uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install komac binary
         run: cargo binstall komac -y
